@@ -6,21 +6,22 @@ const NodeCache = require("node-cache");
 const app = express();
 app.use(cors());
 
-// Bộ đệm (Cache): Lưu dữ liệu 2 tiếng
+// Bộ đệm (Cache): Lưu dữ liệu 2 tiếng (7200s) giúp giảm tải cho Server và tải phim siêu nhanh
 const appCache = new NodeCache({ stdTTL: 7200, checkperiod: 600 });
+// Tăng thời gian chờ (Timeout) lên 15 giây để Add-on có đủ thời gian thử các nguồn dự phòng
 const AXIOS_CONFIG = { timeout: 15000 }; 
 
 // ==========================================
-// 1. CẤU HÌNH MANIFEST
+// 1. CẤU HÌNH MANIFEST (GIAO DIỆN ADD-ON)
 // ==========================================
 const manifest = {
   id: "com.stremio.phimviet.pro",
-  version: "4.1.0", // Đã vá lỗi Phim Bộ và tự động lấy động CDN ảnh
-  name: "Phim Việt HD (Bản Chuẩn)",
-  description: "Kho phim Việt Nam và phim bộ Thuyết minh. Tự động chuyển nguồn dự phòng và sửa lỗi chọn tập phim.",
+  version: "4.0.0", // Version 4.0.0 - Nâng cấp hệ thống tự động tìm nguồn dự phòng
+  name: "Phim Việt HD (Tự Động Đổi Nguồn)",
+  description: "Xem phim Việt Nam và Thuyết minh. Tự động chuyển máy chủ nếu nguồn chính bị sập. Luôn luôn ổn định.",
   resources: ["catalog", "meta", "stream"],
   types: ["movie", "series"],
-  idPrefixes: ["phimviet_"], 
+  idPrefixes: ["phimviet_"], // Định danh riêng của Add-on
   catalogs: [
     { type: "movie", id: "phim-le", name: "Phim Lẻ Mới" },
     { type: "series", id: "phim-bo", name: "Phim Bộ Mới" },
@@ -30,33 +31,23 @@ const manifest = {
 };
 
 // ==========================================
-// 2. CÁC HÀM XỬ LÝ (ĐÃ VÁ LỖI)
+// 2. CÁC HÀM XỬ LÝ LẤY DỮ LIỆU
 // ==========================================
 
-// Hàm lấy danh sách phim (Vá lỗi CDN ảnh động)
+// Hàm lấy danh sách phim (Catalog)
 async function getCatalog(type, id) {
   const cacheKey = `catalog_${id}`;
   if (appCache.has(cacheKey)) return appCache.get(cacheKey);
 
   try {
     const res = await axios.get(`https://phimapi.com/v1/api/danh-sach/${id}?limit=30`, AXIOS_CONFIG);
-    
-    // Tự động lấy tên miền ảnh từ API thay vì gắn cứng để chống lỗi mất ảnh
-    const domainImage = res.data.data?.APP_DOMAIN_CDN_IMAGE || "https://phimimg.com";
-    
-    const metas = res.data.data.items.map((item) => {
-      let posterUrl = item.thumb_url;
-      if (!posterUrl.startsWith("http")) {
-        posterUrl = `${domainImage}/${item.thumb_url}`.replace(/([^:])(\/\/+)/g, '$1/');
-      }
-      return {
-        id: `phimviet_${item.slug}`,
-        type: type,
-        name: item.name,
-        poster: posterUrl,
-        description: item.origin_name || item.name
-      };
-    });
+    const metas = res.data.data.items.map((item) => ({
+      id: `phimviet_${item.slug}`,
+      type: type,
+      name: item.name,
+      poster: `https://phimimg.com/${item.thumb_url}`,
+      description: item.origin_name || item.name
+    }));
 
     if (metas.length > 0) appCache.set(cacheKey, metas);
     return metas;
@@ -66,7 +57,7 @@ async function getCatalog(type, id) {
   }
 }
 
-// Hàm lấy thông tin chi tiết (Vá lỗi mất nút chọn Tập Phim trên Stremio)
+// Hàm lấy thông tin chi tiết phim (Meta)
 async function getMeta(slug, type) {
   const cacheKey = `meta_${slug}`;
   if (appCache.has(cacheKey)) return appCache.get(cacheKey);
@@ -74,88 +65,68 @@ async function getMeta(slug, type) {
   try {
     const res = await axios.get(`https://phimapi.com/phim/${slug}`, AXIOS_CONFIG);
     const data = res.data.movie;
-    const episodesData = res.data.episodes; 
-
+    
     const meta = {
       id: `phimviet_${slug}`,
       type: type,
       name: data.name,
       poster: data.thumb_url,
       background: data.poster_url,
-      description: data.content ? data.content.replace(/(<([^>]+)>)/ig, "") : "",
-      releaseInfo: data.year ? data.year.toString() : "",
-      genres: data.category ? data.category.map(c => c.name) : []
+      description: data.content.replace(/(<([^>]+)>)/ig, ""), // Lọc bỏ thẻ HTML
+      releaseInfo: data.year.toString(),
+      genres: data.category.map(c => c.name)
     };
-
-    // Bắt buộc khai báo cấu trúc tập phim (videos) cho hệ thống Stremio
-    if (type === "series" && episodesData && episodesData.length > 0) {
-      const serverData = episodesData[0].server_data;
-      meta.videos = serverData.map((ep, index) => {
-         const epNumMatch = ep.name.match(/\d+/);
-         const epNum = epNumMatch ? parseInt(epNumMatch[0]) : (index + 1);
-         return {
-            id: `phimviet_${slug}:1:${epNum}`,
-            title: ep.name,
-            season: 1,
-            episode: epNum
-         };
-      });
-    }
 
     appCache.set(cacheKey, meta);
     return meta;
   } catch (error) {
-    console.error(`Lỗi lấy meta ${slug}:`, error.message);
+    console.error(`Lỗi lấy thông tin phim ${slug}:`, error.message);
     return null;
   }
 }
 
-// Hàm lấy link xem phim (Vá lỗi lọc đúng số tập và duy trì Nguồn dự phòng)
-async function getStreamsFromSlug(slug, targetEpisode) {
-  const cacheKey = `stream_${slug}_${targetEpisode || 'full'}`;
+// Hàm lấy Link xem phim (Stream) - TÍCH HỢP NGUỒN DỰ PHÒNG CHỐNG SẬP
+async function getStreamsFromSlug(slug) {
+  const cacheKey = `stream_${slug}`;
   if (appCache.has(cacheKey)) return appCache.get(cacheKey);
 
   let episodes = [];
+  
+  // DANH SÁCH CÁC NGUỒN PHIM TỰ ĐỘNG CHUYỂN TIẾP (FALLBACK)
   const sourceEndpoints = [
     `https://phimapi.com/phim/${slug}`,
     `https://ophim1.com/phim/${slug}`,
     `https://kkphim.vip/phim/${slug}`
   ];
 
+  // Vòng lặp thông minh: Thử từng nguồn một, có link m3u8 là dừng ngay
   for (const url of sourceEndpoints) {
     try {
+      console.log(`[Đang thử kết nối] -> ${url}`);
       const res = await axios.get(url, AXIOS_CONFIG);
+      
+      // Kiểm tra nếu API trả về danh sách tập phim hợp lệ
       if (res.data && res.data.episodes && res.data.episodes.length > 0) {
         episodes = res.data.episodes;
-        break; 
+        console.log(`[Thành công] Đã lấy được link video từ: ${url}`);
+        break; // Dừng vòng lặp vì đã lấy được link
       }
     } catch (error) {
-      continue; 
+      console.log(`[Sập/Lỗi mạng] Không lấy được từ ${url}. Đang chuyển sang nguồn tiếp theo...`);
+      continue; // Bỏ qua và tự động nhảy xuống dòng link nguồn dự phòng
     }
   }
 
   const streams = [];
+  // Xử lý dữ liệu để đẩy vào Stremio
   episodes.forEach((server) => {
     const serverName = server.server_name || "Server HD";
     if (server.server_data) {
-      server.server_data.forEach((ep, index) => {
-        let isMatch = false;
-        
-        // Lọc xem người dùng bấm vào phim lẻ hay tập phim bộ cụ thể
-        if (!targetEpisode) {
-          isMatch = true; 
-        } else {
-          const epNumMatch = ep.name.match(/\d+/);
-          const epNum = epNumMatch ? epNumMatch[0] : (index + 1).toString();
-          if (epNum === targetEpisode || ep.slug === `tap-${targetEpisode}`) {
-            isMatch = true;
-          }
-        }
-
-        if (isMatch && ep.link_m3u8) {
+      server.server_data.forEach((ep) => {
+        if (ep.link_m3u8) {
           streams.push({
             name: "PHIM HD",
-            title: `${serverName} - ${ep.name || "Full"}\n▶ Bấm để xem`,
+            title: `${serverName} - ${ep.name || "Full"}\n▶ Bấm để xem ngay`,
             url: ep.link_m3u8
           });
         }
@@ -163,19 +134,24 @@ async function getStreamsFromSlug(slug, targetEpisode) {
     }
   });
 
-  if (streams.length > 0) appCache.set(cacheKey, streams);
+  if (streams.length > 0) {
+    appCache.set(cacheKey, streams);
+  }
+  
   return streams;
 }
 
 // ==========================================
-// 3. API ĐẦU RA CHO STREMIO
+// 3. CÁC ĐƯỜNG DẪN API CHO STREMIO
 // ==========================================
 
+// Trả về Manifest
 app.get("/manifest.json", (req, res) => {
   res.setHeader("Content-Type", "application/json");
   res.json(manifest);
 });
 
+// Trả về danh sách phim
 app.get("/catalog/:type/:id.json", async (req, res) => {
   const { type, id } = req.params;
   const metas = await getCatalog(type, id);
@@ -183,28 +159,32 @@ app.get("/catalog/:type/:id.json", async (req, res) => {
   res.json({ metas });
 });
 
+// Trả về chi tiết 1 bộ phim
 app.get("/meta/:type/:id.json", async (req, res) => {
   const { type, id } = req.params;
-  const slug = id.replace("phimviet_", ""); 
+  const slug = id.replace("phimviet_", ""); // Tách lấy slug
   const meta = await getMeta(slug, type);
   res.setHeader("Content-Type", "application/json");
   res.json({ meta: meta || {} });
 });
 
+// Trả về link video (Streams) khi người dùng bấm nút Play
 app.get("/stream/:type/:id.json", async (req, res) => {
   const id = req.params.id;
+  
+  // Lọc lấy id tập phim nếu là phim bộ (VD: phimviet_slug:1:1)
   const idParts = id.split(":");
-  
   const slug = idParts[0].replace("phimviet_", "");
-  // Tách lấy đúng số tập mà máy chiếu (Stremio) gửi lên để lọc video
-  const targetEpisode = idParts.length > 2 ? idParts[2] : null; 
   
-  const streams = await getStreamsFromSlug(slug, targetEpisode);
+  const streams = await getStreamsFromSlug(slug);
   res.setHeader("Content-Type", "application/json");
   res.json({ streams });
 });
 
+// ==========================================
+// 4. KHỞI CHẠY MÁY CHỦ (SERVER)
+// ==========================================
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`Add-on Phim Việt v4.1.0 đang chạy trên cổng ${PORT}`);
+  console.log(`Add-on Phim Việt (Bản Nâng Cấp Tự Động) đang chạy trên cổng ${PORT}`);
 });
