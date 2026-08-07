@@ -233,22 +233,37 @@ async function getMetaFromSlug(slug) {
   }
 }
 
-// 4. Stream Handler
+// 4. Stream Handler (Phiên bản Bất tử - Tự động gọi nguồn dự phòng)
 async function getStreamsFromSlug(slug) {
-  const cacheKey = `streams_v32_${slug}`;
+  const cacheKey = `streams_v32_fallback_${slug}`;
   if (appCache.has(cacheKey)) return appCache.get(cacheKey);
 
   let episodes = [];
-  try {
-    const res = await axios.get(`https://phimapi.com/phim/${slug}`, AXIOS_CONFIG);
-    if (res.data?.episodes && res.data.episodes.length > 0) episodes = res.data.episodes;
-  } catch (e) {}
+  
+  // DANH SÁCH CÁC NGUỒN PHIM TỰ ĐỘNG CHUYỂN TIẾP (FALLBACK)
+  const sourceEndpoints = [
+    `https://phimapi.com/phim/${slug}`,
+    `https://ophim1.com/phim/${slug}`,
+    `https://kkphim.vip/phim/${slug}`
+  ];
 
-  if (episodes.length === 0) {
+  // Vòng lặp thông minh: Thử từng nguồn một, có link là dừng ngay
+  for (const url of sourceEndpoints) {
     try {
-      const resFallback = await axios.get(`https://ophim1.com/phim/${slug}`, AXIOS_CONFIG);
-      if (resFallback.data?.episodes) episodes = resFallback.data.episodes;
-    } catch (e) {}
+      const res = await axios.get(url, AXIOS_CONFIG);
+      // Kiểm tra nếu API trả về dữ liệu và có danh sách tập phim
+      if (res.data && res.data.episodes && res.data.episodes.length > 0) {
+        episodes = res.data.episodes;
+        
+        // In ra log để bạn tự kiểm tra xem code đang lấy từ nguồn nào (có thể xem trên tab Logs của Render)
+        console.log(`[Thành công] Lấy link phim từ: ${url}`); 
+        
+        break; // Thoát vòng lặp ngay lập tức vì đã lấy được link
+      }
+    } catch (error) {
+      console.log(`[Lỗi/Sập] Không lấy được từ ${url}, đang thử nguồn tiếp theo...`);
+      continue; // Bỏ qua lỗi và chạy tiếp sang nguồn dự phòng bên dưới
+    }
   }
 
   const streams = [];
@@ -267,7 +282,10 @@ async function getStreamsFromSlug(slug) {
     }
   });
 
-  if (streams.length > 0) appCache.set(cacheKey, streams, 7200);
+  if (streams.length > 0) {
+    appCache.set(cacheKey, streams, 7200); // Lưu đệm 2 tiếng để lần sau bấm vào không phải dò lại
+  }
+  
   return streams;
 }
 
