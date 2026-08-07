@@ -5,7 +5,6 @@ const NodeCache = require("node-cache");
 const appCache = new NodeCache({ stdTTL: 86400, checkperiod: 600 });
 const PHIM_IMG_BASE = "https://phimimg.com/";
 
-// Giả lập User-Agent trình duyệt để Render không bị API chặn
 const AXIOS_CONFIG = {
   headers: {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
@@ -15,12 +14,13 @@ const AXIOS_CONFIG = {
 };
 
 const manifest = {
-  id: "org.phimvietnam.fullarchive.v15",
-  version: "1.5.0",
+  id: "org.phimvietnam.fullarchive.v16",
+  version: "1.6.0",
   name: "Phim Việt Nam (Kho Cũ & Mới)",
-  description: "Tổng hợp Phim Việt Nam (Cũ & Mới) - Tích hợp Dual-Server HD",
+  description: "Tổng hợp Phim Việt Nam (Cũ & Mới) - Phát HD Trực Tiếp",
   resources: ["catalog", "stream"],
   types: ["movie", "series"],
+  idPrefixes: ["phimapi:"], // Khai báo bắt buộc để Stremio gửi yêu cầu Stream
   catalogs: [
     {
       type: "movie",
@@ -39,13 +39,13 @@ function formatImageUrl(path) {
   return `${PHIM_IMG_BASE}${path}`;
 }
 
-// 1. Catalog Handler: Lấy danh sách phim Việt Nam
+// 1. Catalog Handler
 async function getVietnameseMoviesCatalog() {
-  const cacheKey = "phim_viet_catalog_v150";
+  const cacheKey = "phim_viet_catalog_v160";
   if (appCache.has(cacheKey)) return appCache.get(cacheKey);
 
   try {
-    const pageNumbers = Array.from({ length: 12 }, (_, i) => i + 1);
+    const pageNumbers = Array.from({ length: 15 }, (_, i) => i + 1);
     const requests = pageNumbers.map((page) =>
       axios.get(`https://phimapi.com/v1/api/quoc-gia/viet-nam?page=${page}`, AXIOS_CONFIG)
     );
@@ -59,20 +59,15 @@ async function getVietnameseMoviesCatalog() {
       }
     });
 
-    const metas = allItems.map((item) => {
-      const poster = formatImageUrl(item.poster_url || item.thumb_url);
-      const background = formatImageUrl(item.thumb_url || item.poster_url);
-
-      return {
-        id: `phimapi:${item.slug}`,
-        type: item.type === "hoathinh" || item.type === "series" ? "series" : "movie",
-        name: item.name || item.origin_name,
-        poster: poster,
-        background: background,
-        description: `Tên gốc: ${item.origin_name || item.name} | Năm: ${item.year || "N/A"}`,
-        releaseInfo: item.year ? String(item.year) : ""
-      };
-    });
+    const metas = allItems.map((item) => ({
+      id: `phimapi:${item.slug}`,
+      type: "movie", // Ép chuẩn định dạng Movie để phát trực tiếp
+      name: item.name || item.origin_name,
+      poster: formatImageUrl(item.poster_url || item.thumb_url),
+      background: formatImageUrl(item.thumb_url || item.poster_url),
+      description: `Tên gốc: ${item.origin_name || item.name} | Năm: ${item.year || "N/A"}`,
+      releaseInfo: item.year ? String(item.year) : ""
+    }));
 
     appCache.set(cacheKey, metas, 21600);
     return metas;
@@ -91,7 +86,7 @@ async function searchVietnameseMovies(query) {
     const items = res.data?.data?.items || [];
     const metas = items.map((item) => ({
       id: `phimapi:${item.slug}`,
-      type: item.type === "series" ? "series" : "movie",
+      type: "movie",
       name: item.name || item.origin_name,
       poster: formatImageUrl(item.poster_url || item.thumb_url),
       background: formatImageUrl(item.thumb_url || item.poster_url),
@@ -106,14 +101,14 @@ async function searchVietnameseMovies(query) {
   }
 }
 
-// 3. Stream Handler: Dual-Server (PhimAPI + OPhim)
+// 3. Stream Handler (Bóc tách ID chuẩn xác)
 async function getStreamsFromSlug(slug) {
-  const cacheKey = `streams_v15_${slug}`;
+  const cacheKey = `streams_v16_${slug}`;
   if (appCache.has(cacheKey)) return appCache.get(cacheKey);
 
   let episodes = [];
 
-  // Thử server chính (PhimAPI)
+  // Lấy dữ liệu từ PhimAPI
   try {
     const res = await axios.get(`https://phimapi.com/phim/${slug}`, AXIOS_CONFIG);
     if (res.data?.episodes && res.data.episodes.length > 0) {
@@ -121,7 +116,7 @@ async function getStreamsFromSlug(slug) {
     }
   } catch (e) {}
 
-  // Nếu server chính không có data, chuyển sang server dự phòng (OPhim)
+  // Server dự phòng (OPhim)
   if (episodes.length === 0) {
     try {
       const resFallback = await axios.get(`https://ophim1.com/phim/${slug}`, AXIOS_CONFIG);
@@ -171,7 +166,9 @@ builder.defineCatalogHandler(async (args) => {
 // Register Stream Handler
 builder.defineStreamHandler(async (args) => {
   if (args.id.startsWith("phimapi:")) {
-    const slug = args.id.replace("phimapi:", "");
+    // Xử lý tách chuỗi để lấy đúng slug phim
+    const cleanId = args.id.replace("phimapi:", "");
+    const slug = cleanId.split(":")[0];
     const streams = await getStreamsFromSlug(slug);
     return { streams: streams };
   }
@@ -180,5 +177,5 @@ builder.defineStreamHandler(async (args) => {
 
 const PORT = process.env.PORT || 7000;
 serveHTTP(builder.getInterface(), { port: PORT }).then(({ url }) => {
-  console.log(`Addon v1.5.0 đang chạy tại: ${url}manifest.json`);
+  console.log(`Addon v1.6.0 đang chạy tại: ${url}manifest.json`);
 });
