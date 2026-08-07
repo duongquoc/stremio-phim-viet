@@ -1,124 +1,257 @@
-const express = require("express");
-const cors = require("cors");
+const { addonBuilder, serveHTTP } = require("stremio-addon-sdk");
 const axios = require("axios");
 const NodeCache = require("node-cache");
 
-const app = express();
-app.use(cors());
+const appCache = new NodeCache({ stdTTL: 86400, checkperiod: 600 });
+const PHIM_IMG_BASE = "https://phimimg.com/";
 
-// Bộ đệm (Cache): Lưu dữ liệu 2 tiếng (7200s) giúp giảm tải cho Server và tải phim siêu nhanh
-const appCache = new NodeCache({ stdTTL: 7200, checkperiod: 600 });
-// Tăng thời gian chờ (Timeout) lên 15 giây để Add-on có đủ thời gian thử các nguồn dự phòng
-const AXIOS_CONFIG = { timeout: 15000 }; 
+const AXIOS_CONFIG = {
+  headers: {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "application/json, text/plain, */*"
+  },
+  timeout: 10000
+};
 
-// ==========================================
-// 1. CẤU HÌNH MANIFEST (GIAO DIỆN ADD-ON)
-// ==========================================
+const GENRE_SLUGS = {
+  "Hành động": "hanh-dong",
+  "Hài hước": "hai-huoc",
+  "Tình cảm": "tinh-cam",
+  "Kinh dị": "kinh-di",
+  "Viễn tưởng": "vien-tuong",
+  "Võ thuật": "vo-thuat",
+  "Tâm lý": "tam-ly",
+  "Cổ trang": "co-trang",
+  "Hoạt hình": "hoat-hinh"
+};
+
+const COUNTRY_SLUGS = {
+  "Việt Nam": "viet-nam",
+  "Âu Mỹ": "au-my",
+  "Hàn Quốc": "han-quoc",
+  "Trung Quốc": "trung-quoc",
+  "Nhật Bản": "nhat-ban"
+};
+
 const manifest = {
-  id: "com.stremio.phimviet.pro",
-  version: "4.0.0", // Version 4.0.0 - Nâng cấp hệ thống tự động tìm nguồn dự phòng
-  name: "Phim Việt HD (Tự Động Đổi Nguồn)",
-  description: "Xem phim Việt Nam và Thuyết minh. Tự động chuyển máy chủ nếu nguồn chính bị sập. Luôn luôn ổn định.",
+  id: "org.phimtonghop.v320",
+  version: "3.2.0",
+  name: "Kho Phim Tổng Hợp HD",
+  description: "Bổ sung Điểm Đánh Giá (Rating) & Phân loại Năm",
   resources: ["catalog", "meta", "stream"],
   types: ["movie", "series"],
-  idPrefixes: ["phimviet_"], // Định danh riêng của Add-on
+  idPrefixes: ["phimapi:"],
   catalogs: [
-    { type: "movie", id: "phim-le", name: "Phim Lẻ Mới" },
-    { type: "series", id: "phim-bo", name: "Phim Bộ Mới" },
-    { type: "series", id: "hoat-hinh", name: "Hoạt Hình" },
-    { type: "series", id: "tv-shows", name: "TV Shows" }
+    {
+      type: "movie",
+      id: "phim_vietnam",
+      name: "Phim Việt Nam",
+      extra: [
+        {
+          name: "genre",
+          options: [
+            "Tất cả", "2026", "2025", "2024", "2023", "2022", "2021", "2020", "2019", "2018", "2015", "2010",
+            "Hành động", "Hài hước", "Tình cảm", "Kinh dị", "Tâm lý"
+          ],
+          isRequired: false
+        },
+        { name: "search", isRequired: false }
+      ]
+    },
+    {
+      type: "movie",
+      id: "phim_nuocngoai",
+      name: "Phim Nước Ngoài HD",
+      extra: [
+        {
+          name: "genre",
+          options: [
+            "Âu Mỹ", "Hàn Quốc", "Trung Quốc", "Nhật Bản",
+            "Hành động", "Kinh dị", "Viễn tưởng", "Hài hước", "Tình cảm", "Võ thuật", "Cổ trang",
+            "2026", "2025", "2024", "2023", "2022", "2021", "2020", "2019", "2018", "2015", "2010"
+          ],
+          isRequired: false
+        },
+        { name: "search", isRequired: false }
+      ]
+    }
   ]
 };
 
-// ==========================================
-// 2. CÁC HÀM XỬ LÝ LẤY DỮ LIỆU
-// ==========================================
+const builder = new addonBuilder(manifest);
 
-// Hàm lấy danh sách phim (Catalog)
-async function getCatalog(type, id) {
-  const cacheKey = `catalog_${id}`;
+function formatImageUrl(path) {
+  if (!path) return null;
+  if (path.startsWith("http://") || path.startsWith("https://")) return path;
+  return `${PHIM_IMG_BASE}${path}`;
+}
+
+async function fetchItemsFromUrl(baseUrl, numPages = 25) {
+  const pageNumbers = Array.from({ length: numPages }, (_, i) => i + 1);
+  const requests = pageNumbers.map((page) =>
+    axios.get(`${baseUrl}${baseUrl.includes("?") ? "&" : "?"}page=${page}`, AXIOS_CONFIG)
+  );
+
+  const responses = await Promise.allSettled(requests);
+  let allItems = [];
+
+  responses.forEach((res) => {
+    if (res.status === "fulfilled" && res.value.data?.data?.items) {
+      allItems = allItems.concat(res.value.data.data.items);
+    }
+  });
+
+  return allItems;
+}
+
+// Bóc tách điểm số cho danh mục ngoài
+function convertItemsToMetas(items) {
+  return items.map((item) => {
+    let rating = "N/A";
+    if (item.tmdb && item.tmdb.vote_average) rating = item.tmdb.vote_average;
+    else if (item.imdb && item.imdb.rating) rating = item.imdb.rating;
+
+    return {
+      id: `phimapi:${item.slug}`,
+      type: "movie",
+      name: item.name || item.origin_name,
+      poster: formatImageUrl(item.poster_url || item.thumb_url),
+      background: formatImageUrl(item.thumb_url || item.poster_url),
+      description: rating !== "N/A" ? `⭐ Điểm: ${rating}/10 | Tên gốc: ${item.origin_name || item.name}` : `Tên gốc: ${item.origin_name || item.name} | Năm: ${item.year || "N/A"}`,
+      releaseInfo: item.year ? String(item.year) : "",
+      imdbRating: rating !== "N/A" ? String(rating) : undefined
+    };
+  });
+}
+
+// 1. Catalog Handler
+async function getCatalog(catalogId, selectedGenre) {
+  const cacheKey = `cat_${catalogId}_${selectedGenre || "all"}`;
+  if (appCache.has(cacheKey)) return appCache.get(cacheKey);
+
+  let targetUrl = "";
+  let isYearFilter = false;
+  let targetYear = null;
+
+  if (catalogId === "phim_vietnam") {
+    if (selectedGenre && !isNaN(selectedGenre)) {
+      isYearFilter = true;
+      targetYear = parseInt(selectedGenre);
+      targetUrl = "https://phimapi.com/v1/api/quoc-gia/viet-nam";
+    } else if (selectedGenre && GENRE_SLUGS[selectedGenre]) {
+      targetUrl = `https://phimapi.com/v1/api/the-loai/${GENRE_SLUGS[selectedGenre]}`;
+    } else {
+      targetUrl = "https://phimapi.com/v1/api/quoc-gia/viet-nam";
+    }
+  } else if (catalogId === "phim_nuocngoai") {
+    if (selectedGenre && COUNTRY_SLUGS[selectedGenre]) {
+      targetUrl = `https://phimapi.com/v1/api/quoc-gia/${COUNTRY_SLUGS[selectedGenre]}`;
+    } else if (selectedGenre && GENRE_SLUGS[selectedGenre]) {
+      targetUrl = `https://phimapi.com/v1/api/the-loai/${GENRE_SLUGS[selectedGenre]}`;
+    } else if (selectedGenre && !isNaN(selectedGenre)) {
+      isYearFilter = true;
+      targetYear = parseInt(selectedGenre);
+      targetUrl = "https://phimapi.com/v1/api/danh-sach/phim-le";
+    } else {
+      targetUrl = "https://phimapi.com/v1/api/danh-sach/phim-le";
+    }
+  }
+
+  let items = await fetchItemsFromUrl(targetUrl, 25);
+
+  if (catalogId === "phim_vietnam" && selectedGenre && GENRE_SLUGS[selectedGenre]) {
+    items = items.filter((item) =>
+      item.country?.some((c) => c.name === "Việt Nam" || c.slug === "viet-nam")
+    );
+  }
+
+  if (isYearFilter && targetYear) {
+    items = items.filter((item) => item.year === targetYear);
+  }
+
+  const metas = convertItemsToMetas(items);
+  appCache.set(cacheKey, metas, 14400);
+  return metas;
+}
+
+// 2. Search Handler
+async function searchMovies(query) {
+  const cacheKey = `search_phimapi_${query.toLowerCase().trim()}`;
   if (appCache.has(cacheKey)) return appCache.get(cacheKey);
 
   try {
-    const res = await axios.get(`https://phimapi.com/v1/api/danh-sach/${id}?limit=30`, AXIOS_CONFIG);
-    const metas = res.data.data.items.map((item) => ({
-      id: `phimviet_${item.slug}`,
-      type: type,
-      name: item.name,
-      poster: `https://phimimg.com/${item.thumb_url}`,
-      description: item.origin_name || item.name
-    }));
+    const res = await axios.get(`https://phimapi.com/v1/api/tim-kiem?keyword=${encodeURIComponent(query)}&limit=40`, AXIOS_CONFIG);
+    const items = res.data?.data?.items || [];
+    const metas = convertItemsToMetas(items);
 
-    if (metas.length > 0) appCache.set(cacheKey, metas);
+    appCache.set(cacheKey, metas, 3600);
     return metas;
   } catch (error) {
-    console.error("Lỗi lấy danh mục:", error.message);
     return [];
   }
 }
 
-// Hàm lấy thông tin chi tiết phim (Meta)
-async function getMeta(slug, type) {
-  const cacheKey = `meta_${slug}`;
+// 3. Meta Handler (Lấy chi tiết và điểm đánh giá)
+async function getMetaFromSlug(slug) {
+  const cacheKey = `meta_detail_${slug}`;
   if (appCache.has(cacheKey)) return appCache.get(cacheKey);
 
   try {
     const res = await axios.get(`https://phimapi.com/phim/${slug}`, AXIOS_CONFIG);
-    const data = res.data.movie;
-    
+    const movie = res.data?.movie;
+    if (!movie) return null;
+
+    // Tìm kiếm thông số đánh giá từ API
+    let rating = "N/A";
+    if (movie.tmdb && movie.tmdb.vote_average) {
+      rating = movie.tmdb.vote_average;
+    } else if (movie.imdb && movie.imdb.rating) {
+      rating = movie.imdb.rating;
+    }
+
+    const ratingText = rating !== "N/A" ? `⭐ ĐIỂM ĐÁNH GIÁ: ${rating}/10\n\n` : "";
+    const cleanDescription = movie.content
+      ? movie.content.replace(/<[^>]*>?/gm, "")
+      : `Tên gốc: ${movie.origin_name || movie.name} | Năm: ${movie.year || "N/A"}`;
+
     const meta = {
-      id: `phimviet_${slug}`,
-      type: type,
-      name: data.name,
-      poster: data.thumb_url,
-      background: data.poster_url,
-      description: data.content.replace(/(<([^>]+)>)/ig, ""), // Lọc bỏ thẻ HTML
-      releaseInfo: data.year.toString(),
-      genres: data.category.map(c => c.name)
+      id: `phimapi:${slug}`,
+      type: "movie",
+      name: movie.name || movie.origin_name,
+      poster: formatImageUrl(movie.poster_url || movie.thumb_url),
+      background: formatImageUrl(movie.thumb_url || movie.poster_url),
+      description: `${ratingText}${cleanDescription}`,
+      releaseInfo: movie.year ? String(movie.year) : "",
+      genres: movie.category ? movie.category.map((c) => c.name) : ["Phim"],
+      imdbRating: rating !== "N/A" ? String(rating) : undefined
     };
 
-    appCache.set(cacheKey, meta);
+    appCache.set(cacheKey, meta, 86400);
     return meta;
-  } catch (error) {
-    console.error(`Lỗi lấy thông tin phim ${slug}:`, error.message);
+  } catch (e) {
     return null;
   }
 }
 
-// Hàm lấy Link xem phim (Stream) - TÍCH HỢP NGUỒN DỰ PHÒNG CHỐNG SẬP
+// 4. Stream Handler
 async function getStreamsFromSlug(slug) {
-  const cacheKey = `stream_${slug}`;
+  const cacheKey = `streams_v32_${slug}`;
   if (appCache.has(cacheKey)) return appCache.get(cacheKey);
 
   let episodes = [];
-  
-  // DANH SÁCH CÁC NGUỒN PHIM TỰ ĐỘNG CHUYỂN TIẾP (FALLBACK)
-  const sourceEndpoints = [
-    `https://phimapi.com/phim/${slug}`,
-    `https://ophim1.com/phim/${slug}`,
-    `https://kkphim.vip/phim/${slug}`
-  ];
+  try {
+    const res = await axios.get(`https://phimapi.com/phim/${slug}`, AXIOS_CONFIG);
+    if (res.data?.episodes && res.data.episodes.length > 0) episodes = res.data.episodes;
+  } catch (e) {}
 
-  // Vòng lặp thông minh: Thử từng nguồn một, có link m3u8 là dừng ngay
-  for (const url of sourceEndpoints) {
+  if (episodes.length === 0) {
     try {
-      console.log(`[Đang thử kết nối] -> ${url}`);
-      const res = await axios.get(url, AXIOS_CONFIG);
-      
-      // Kiểm tra nếu API trả về danh sách tập phim hợp lệ
-      if (res.data && res.data.episodes && res.data.episodes.length > 0) {
-        episodes = res.data.episodes;
-        console.log(`[Thành công] Đã lấy được link video từ: ${url}`);
-        break; // Dừng vòng lặp vì đã lấy được link
-      }
-    } catch (error) {
-      console.log(`[Sập/Lỗi mạng] Không lấy được từ ${url}. Đang chuyển sang nguồn tiếp theo...`);
-      continue; // Bỏ qua và tự động nhảy xuống dòng link nguồn dự phòng
-    }
+      const resFallback = await axios.get(`https://ophim1.com/phim/${slug}`, AXIOS_CONFIG);
+      if (resFallback.data?.episodes) episodes = resFallback.data.episodes;
+    } catch (e) {}
   }
 
   const streams = [];
-  // Xử lý dữ liệu để đẩy vào Stremio
   episodes.forEach((server) => {
     const serverName = server.server_name || "Server HD";
     if (server.server_data) {
@@ -134,57 +267,42 @@ async function getStreamsFromSlug(slug) {
     }
   });
 
-  if (streams.length > 0) {
-    appCache.set(cacheKey, streams);
-  }
-  
+  if (streams.length > 0) appCache.set(cacheKey, streams, 7200);
   return streams;
 }
 
-// ==========================================
-// 3. CÁC ĐƯỜNG DẪN API CHO STREMIO
-// ==========================================
-
-// Trả về Manifest
-app.get("/manifest.json", (req, res) => {
-  res.setHeader("Content-Type", "application/json");
-  res.json(manifest);
+// Đăng ký Handlers
+builder.defineCatalogHandler(async (args) => {
+  if (args.extra && args.extra.search) {
+    const searchResults = await searchMovies(args.extra.search);
+    return { metas: searchResults };
+  }
+  const selectedGenre = args.extra ? args.extra.genre : null;
+  const metas = await getCatalog(args.id, selectedGenre);
+  return { metas: metas };
 });
 
-// Trả về danh sách phim
-app.get("/catalog/:type/:id.json", async (req, res) => {
-  const { type, id } = req.params;
-  const metas = await getCatalog(type, id);
-  res.setHeader("Content-Type", "application/json");
-  res.json({ metas });
+builder.defineMetaHandler(async (args) => {
+  if (args.id && args.id.includes("phimapi:")) {
+    const cleanId = args.id.substring(args.id.indexOf("phimapi:") + 8);
+    const slug = cleanId.split(":")[0];
+    const meta = await getMetaFromSlug(slug);
+    if (meta) return { meta: meta };
+  }
+  return { meta: {} };
 });
 
-// Trả về chi tiết 1 bộ phim
-app.get("/meta/:type/:id.json", async (req, res) => {
-  const { type, id } = req.params;
-  const slug = id.replace("phimviet_", ""); // Tách lấy slug
-  const meta = await getMeta(slug, type);
-  res.setHeader("Content-Type", "application/json");
-  res.json({ meta: meta || {} });
+builder.defineStreamHandler(async (args) => {
+  if (args.id && args.id.includes("phimapi:")) {
+    const cleanId = args.id.substring(args.id.indexOf("phimapi:") + 8);
+    const slug = cleanId.split(":")[0];
+    const streams = await getStreamsFromSlug(slug);
+    return { streams: streams };
+  }
+  return { streams: [] };
 });
 
-// Trả về link video (Streams) khi người dùng bấm nút Play
-app.get("/stream/:type/:id.json", async (req, res) => {
-  const id = req.params.id;
-  
-  // Lọc lấy id tập phim nếu là phim bộ (VD: phimviet_slug:1:1)
-  const idParts = id.split(":");
-  const slug = idParts[0].replace("phimviet_", "");
-  
-  const streams = await getStreamsFromSlug(slug);
-  res.setHeader("Content-Type", "application/json");
-  res.json({ streams });
-});
-
-// ==========================================
-// 4. KHỞI CHẠY MÁY CHỦ (SERVER)
-// ==========================================
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`Add-on Phim Việt (Bản Nâng Cấp Tự Động) đang chạy trên cổng ${PORT}`);
+const PORT = process.env.PORT || 7000;
+serveHTTP(builder.getInterface(), { port: PORT }).then(({ url }) => {
+  console.log(`Addon v3.2.0 đang chạy tại: ${url}manifest.json`);
 });
