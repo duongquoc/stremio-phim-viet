@@ -10,7 +10,7 @@ const AXIOS_CONFIG = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
     "Accept": "application/json, text/plain, */*"
   },
-  timeout: 10000 // Tăng thời gian chờ để tải nhiều phim hơn
+  timeout: 10000
 };
 
 const GENRE_SLUGS = {
@@ -34,10 +34,10 @@ const COUNTRY_SLUGS = {
 };
 
 const manifest = {
-  id: "org.phimtonghop.v310",
-  version: "3.1.0",
+  id: "org.phimtonghop.v320",
+  version: "3.2.0",
   name: "Kho Phim Tổng Hợp HD",
-  description: "Tăng cường 500+ Phim mỗi danh mục & Bộ lọc năm cũ",
+  description: "Bổ sung Điểm Đánh Giá (Rating) & Phân loại Năm",
   resources: ["catalog", "meta", "stream"],
   types: ["movie", "series"],
   idPrefixes: ["phimapi:"],
@@ -86,7 +86,6 @@ function formatImageUrl(path) {
   return `${PHIM_IMG_BASE}${path}`;
 }
 
-// Quét sâu 25 trang dữ liệu cùng lúc
 async function fetchItemsFromUrl(baseUrl, numPages = 25) {
   const pageNumbers = Array.from({ length: numPages }, (_, i) => i + 1);
   const requests = pageNumbers.map((page) =>
@@ -105,16 +104,24 @@ async function fetchItemsFromUrl(baseUrl, numPages = 25) {
   return allItems;
 }
 
+// Bóc tách điểm số cho danh mục ngoài
 function convertItemsToMetas(items) {
-  return items.map((item) => ({
-    id: `phimapi:${item.slug}`,
-    type: "movie",
-    name: item.name || item.origin_name,
-    poster: formatImageUrl(item.poster_url || item.thumb_url),
-    background: formatImageUrl(item.thumb_url || item.poster_url),
-    description: `Tên gốc: ${item.origin_name || item.name} | Năm: ${item.year || "N/A"}`,
-    releaseInfo: item.year ? String(item.year) : ""
-  }));
+  return items.map((item) => {
+    let rating = "N/A";
+    if (item.tmdb && item.tmdb.vote_average) rating = item.tmdb.vote_average;
+    else if (item.imdb && item.imdb.rating) rating = item.imdb.rating;
+
+    return {
+      id: `phimapi:${item.slug}`,
+      type: "movie",
+      name: item.name || item.origin_name,
+      poster: formatImageUrl(item.poster_url || item.thumb_url),
+      background: formatImageUrl(item.thumb_url || item.poster_url),
+      description: rating !== "N/A" ? `⭐ Điểm: ${rating}/10 | Tên gốc: ${item.origin_name || item.name}` : `Tên gốc: ${item.origin_name || item.name} | Năm: ${item.year || "N/A"}`,
+      releaseInfo: item.year ? String(item.year) : "",
+      imdbRating: rating !== "N/A" ? String(rating) : undefined
+    };
+  });
 }
 
 // 1. Catalog Handler
@@ -150,7 +157,6 @@ async function getCatalog(catalogId, selectedGenre) {
     }
   }
 
-  // Lấy dữ liệu với độ sâu 25 trang
   let items = await fetchItemsFromUrl(targetUrl, 25);
 
   if (catalogId === "phim_vietnam" && selectedGenre && GENRE_SLUGS[selectedGenre]) {
@@ -185,7 +191,7 @@ async function searchMovies(query) {
   }
 }
 
-// 3. Meta Handler
+// 3. Meta Handler (Lấy chi tiết và điểm đánh giá)
 async function getMetaFromSlug(slug) {
   const cacheKey = `meta_detail_${slug}`;
   if (appCache.has(cacheKey)) return appCache.get(cacheKey);
@@ -195,6 +201,15 @@ async function getMetaFromSlug(slug) {
     const movie = res.data?.movie;
     if (!movie) return null;
 
+    // Tìm kiếm thông số đánh giá từ API
+    let rating = "N/A";
+    if (movie.tmdb && movie.tmdb.vote_average) {
+      rating = movie.tmdb.vote_average;
+    } else if (movie.imdb && movie.imdb.rating) {
+      rating = movie.imdb.rating;
+    }
+
+    const ratingText = rating !== "N/A" ? `⭐ ĐIỂM ĐÁNH GIÁ: ${rating}/10\n\n` : "";
     const cleanDescription = movie.content
       ? movie.content.replace(/<[^>]*>?/gm, "")
       : `Tên gốc: ${movie.origin_name || movie.name} | Năm: ${movie.year || "N/A"}`;
@@ -205,9 +220,10 @@ async function getMetaFromSlug(slug) {
       name: movie.name || movie.origin_name,
       poster: formatImageUrl(movie.poster_url || movie.thumb_url),
       background: formatImageUrl(movie.thumb_url || movie.poster_url),
-      description: cleanDescription,
+      description: `${ratingText}${cleanDescription}`,
       releaseInfo: movie.year ? String(movie.year) : "",
-      genres: movie.category ? movie.category.map((c) => c.name) : ["Phim"]
+      genres: movie.category ? movie.category.map((c) => c.name) : ["Phim"],
+      imdbRating: rating !== "N/A" ? String(rating) : undefined
     };
 
     appCache.set(cacheKey, meta, 86400);
@@ -219,29 +235,23 @@ async function getMetaFromSlug(slug) {
 
 // 4. Stream Handler
 async function getStreamsFromSlug(slug) {
-  const cacheKey = `streams_v31_${slug}`;
+  const cacheKey = `streams_v32_${slug}`;
   if (appCache.has(cacheKey)) return appCache.get(cacheKey);
 
   let episodes = [];
-
   try {
     const res = await axios.get(`https://phimapi.com/phim/${slug}`, AXIOS_CONFIG);
-    if (res.data?.episodes && res.data.episodes.length > 0) {
-      episodes = res.data.episodes;
-    }
+    if (res.data?.episodes && res.data.episodes.length > 0) episodes = res.data.episodes;
   } catch (e) {}
 
   if (episodes.length === 0) {
     try {
       const resFallback = await axios.get(`https://ophim1.com/phim/${slug}`, AXIOS_CONFIG);
-      if (resFallback.data?.episodes) {
-        episodes = resFallback.data.episodes;
-      }
+      if (resFallback.data?.episodes) episodes = resFallback.data.episodes;
     } catch (e) {}
   }
 
   const streams = [];
-
   episodes.forEach((server) => {
     const serverName = server.server_name || "Server HD";
     if (server.server_data) {
@@ -257,14 +267,11 @@ async function getStreamsFromSlug(slug) {
     }
   });
 
-  if (streams.length > 0) {
-    appCache.set(cacheKey, streams, 7200);
-  }
-
+  if (streams.length > 0) appCache.set(cacheKey, streams, 7200);
   return streams;
 }
 
-// Đăng ký các Handler
+// Đăng ký Handlers
 builder.defineCatalogHandler(async (args) => {
   if (args.extra && args.extra.search) {
     const searchResults = await searchMovies(args.extra.search);
@@ -297,5 +304,5 @@ builder.defineStreamHandler(async (args) => {
 
 const PORT = process.env.PORT || 7000;
 serveHTTP(builder.getInterface(), { port: PORT }).then(({ url }) => {
-  console.log(`Addon v3.1.0 đang chạy tại: ${url}manifest.json`);
+  console.log(`Addon v3.2.0 đang chạy tại: ${url}manifest.json`);
 });
