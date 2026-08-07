@@ -3,36 +3,21 @@ const axios = require("axios");
 const NodeCache = require("node-cache");
 
 const appCache = new NodeCache({ stdTTL: 86400, checkperiod: 600 });
-
-const TMDB_API_KEY = process.env.TMDB_API_KEY || "4e341b1644f8880b1bc273501b96cedf";
-const TMDB_BASE_URL = "https://api.themoviedb.org/3";
-
-const GENRE_MAP = {
-  "Hành động": 28,
-  "Hài": 35,
-  "Tình cảm": 10749,
-  "Kinh dị": 27,
-  "Tâm lý": 18
-};
+const PHIM_IMG_BASE = "https://phimimg.com/";
 
 const manifest = {
-  id: "org.phimvietnam.cinema.fullstream",
-  version: "1.3.0",
-  name: "Phim Chiếu Rạp VN",
-  description: "Cập nhật 100+ Phim Việt Nam & Nguồn phát HD trực tiếp",
-  resources: ["catalog", "stream"], // Bổ sung quyền phát stream video
-  types: ["movie"],
+  id: "org.phimvietnam.fullarchive",
+  version: "1.4.0",
+  name: "Phim Việt Nam (Kho Phim Cũ & Mới)",
+  description: "Tổng hợp 300+ Phim Chiếu Rạp & Phim Việt Nam (Cũ & Mới) - Phát HD Mượt Mà",
+  resources: ["catalog", "stream"],
+  types: ["movie", "series"],
   catalogs: [
     {
       type: "movie",
-      id: "phimviet_imdb",
-      name: "Phim Việt Chiếu Rạp",
+      id: "phimviet_all",
+      name: "Phim Việt Kho Tổng Hợp",
       extra: [
-        {
-          name: "genre",
-          options: ["Hành động", "Hài", "Tình cảm", "Kinh dị", "Tâm lý"],
-          isRequired: false
-        },
         {
           name: "search",
           isRequired: false
@@ -44,182 +29,107 @@ const manifest = {
 
 const builder = new addonBuilder(manifest);
 
-// 1. Hàm lấy chi tiết phim từ TMDB
-async function getMovieDetailsFromTmdb(tmdbId) {
-  const cacheKey = `movie_detail_${tmdbId}`;
-  if (appCache.has(cacheKey)) return appCache.get(cacheKey);
-
-  try {
-    const [extRes, detailRes] = await Promise.all([
-      axios.get(`${TMDB_BASE_URL}/movie/${tmdbId}/external_ids`, { params: { api_key: TMDB_API_KEY } }),
-      axios.get(`${TMDB_BASE_URL}/movie/${tmdbId}`, { params: { api_key: TMDB_API_KEY, language: "vi-VN" } })
-    ]);
-
-    const info = {
-      imdbId: extRes.data.imdb_id || null,
-      title: detailRes.data.title || detailRes.data.original_title
-    };
-
-    appCache.set(cacheKey, info, 604800);
-    return info;
-  } catch (error) {
-    return null;
+function formatImageUrl(path) {
+  if (!path) return null;
+  if (path.startsWith("http://") || path.startsWith("https://")) {
+    return path;
   }
+  return `${PHIM_IMG_BASE}${path}`;
 }
 
-// 2. Hàm lấy danh sách phim (Tải 5 trang = ~100 phim)
-async function getVietnameseMovies(genreName) {
-  const genreKey = genreName || "all";
-  const cacheKey = `catalog_vn_v2_${genreKey}`;
-
+// 1. Lấy danh sách phim Việt Nam (Quét 15 trang = ~360 phim mọi thời kỳ)
+async function getVietnameseMoviesCatalog() {
+  const cacheKey = "phim_viet_catalog_v140";
   if (appCache.has(cacheKey)) return appCache.get(cacheKey);
 
   try {
-    const pages = [1, 2, 3, 4, 5];
-    const requests = pages.map((page) => {
-      const apiParams = {
-        api_key: TMDB_API_KEY,
-        with_origin_country: "VN",
-        language: "vi-VN",
-        sort_by: "primary_release_date.desc",
-        page: page
-      };
-      if (genreName && GENRE_MAP[genreName]) {
-        apiParams.with_genres = GENRE_MAP[genreName];
-      }
-      return axios.get(`${TMDB_BASE_URL}/discover/movie`, { params: apiParams });
-    });
+    const pageNumbers = Array.from({ length: 15 }, (_, i) => i + 1);
+    const requests = pageNumbers.map((page) =>
+      axios.get("https://phimapi.com/v1/api/quoc-gia/viet-nam", {
+        params: { page: page },
+        timeout: 8000
+      })
+    );
 
-    const responses = await Promise.all(requests);
-    let rawMovies = [];
+    const responses = await Promise.allSettled(requests);
+    let allItems = [];
+
     responses.forEach((res) => {
-      if (res.data && res.data.results) {
-        rawMovies = rawMovies.concat(res.data.results);
+      if (res.status === "fulfilled" && res.value.data?.data?.items) {
+        allItems = allItems.concat(res.value.data.data.items);
       }
     });
 
-    const uniqueMovies = Array.from(new Map(rawMovies.map((m) => [m.id, m])).values());
-
-    const metasPromises = uniqueMovies.map(async (movie) => {
-      const detail = await getMovieDetailsFromTmdb(movie.id);
-      const itemId = (detail && detail.imdbId) ? detail.imdbId : `tmdb:${movie.id}`;
-      const title = (detail && detail.title) ? detail.title : (movie.title || movie.original_title);
-
-      // Lưu tên phim vào cache để Stream Handler sử dụng
-      appCache.set(`title_of_${itemId}`, title, 604800);
-      appCache.set(`title_of_tmdb:${movie.id}`, title, 604800);
+    const metas = allItems.map((item) => {
+      const poster = formatImageUrl(item.poster_url || item.thumb_url);
+      const background = formatImageUrl(item.thumb_url || item.poster_url);
 
       return {
-        id: itemId,
-        type: "movie",
-        name: title,
-        poster: movie.poster_path ? `https://image.tmdb.org/t/p/w500${movie.poster_path}` : null,
-        background: movie.backdrop_path ? `https://image.tmdb.org/t/p/w1280${movie.backdrop_path}` : null,
-        description: movie.overview || "Chưa có mô tả nội dung.",
-        releaseInfo: movie.release_date ? movie.release_date.substring(0, 4) : "",
-        genres: genreName ? [genreName] : ["Phim Việt"]
+        id: `phimapi:${item.slug}`,
+        type: item.type === "hoathinh" || item.type === "series" ? "series" : "movie",
+        name: item.name || item.origin_name,
+        poster: poster,
+        background: background,
+        description: `Tên gốc: ${item.origin_name || item.name} | Năm: ${item.year || "N/A"}`,
+        releaseInfo: item.year ? String(item.year) : ""
       };
     });
 
-    const movies = await Promise.all(metasPromises);
-    appCache.set(cacheKey, movies, 43200);
-    return movies;
+    appCache.set(cacheKey, metas, 21600);
+    return metas;
   } catch (error) {
     return [];
   }
 }
 
-// 3. Hàm tìm kiếm phim
+// 2. Tìm kiếm phim Việt Nam
 async function searchVietnameseMovies(query) {
-  const cacheKey = `search_vn_${query.toLowerCase().trim()}`;
+  const cacheKey = `search_phimapi_${query.toLowerCase().trim()}`;
   if (appCache.has(cacheKey)) return appCache.get(cacheKey);
 
   try {
-    const response = await axios.get(`${TMDB_BASE_URL}/search/movie`, {
-      params: { api_key: TMDB_API_KEY, query: query, language: "vi-VN", page: 1 }
+    const res = await axios.get("https://phimapi.com/v1/api/tim-kiem", {
+      params: { keyword: query, limit: 20 },
+      timeout: 8000
     });
 
-    const rawMovies = response.data.results.filter((movie) => {
-      const isViLang = movie.original_language === "vi";
-      const isVnCountry = movie.origin_country && movie.origin_country.includes("VN");
-      return isViLang || isVnCountry;
-    });
-
-    const metasPromises = rawMovies.map(async (movie) => {
-      const detail = await getMovieDetailsFromTmdb(movie.id);
-      const itemId = (detail && detail.imdbId) ? detail.imdbId : `tmdb:${movie.id}`;
-      const title = movie.title || movie.original_title;
-
-      appCache.set(`title_of_${itemId}`, title, 604800);
-
+    const items = res.data?.data?.items || [];
+    const metas = items.map((item) => {
       return {
-        id: itemId,
-        type: "movie",
-        name: title,
-        poster: movie.poster_path ? `https://image.tmdb.org/t/p/w500${movie.poster_path}` : null,
-        background: movie.backdrop_path ? `https://image.tmdb.org/t/p/w1280${movie.backdrop_path}` : null,
-        description: movie.overview || "Chưa có mô tả nội dung.",
-        releaseInfo: movie.release_date ? movie.release_date.substring(0, 4) : ""
+        id: `phimapi:${item.slug}`,
+        type: item.type === "series" ? "series" : "movie",
+        name: item.name || item.origin_name,
+        poster: formatImageUrl(item.poster_url || item.thumb_url),
+        background: formatImageUrl(item.thumb_url || item.poster_url),
+        description: `Năm: ${item.year || "N/A"}`,
+        releaseInfo: item.year ? String(item.year) : ""
       };
     });
 
-    const movies = await Promise.all(metasPromises);
-    appCache.set(cacheKey, movies, 3600);
-    return movies;
+    appCache.set(cacheKey, metas, 3600);
+    return metas;
   } catch (error) {
     return [];
   }
 }
 
-// 4. Stream Handler: Tự động tra cứu link video từ PhimAPI
-async function getStreamsForMovie(id) {
-  const cacheKey = `stream_for_${id}`;
+// 3. Lấy nguồn phát Stream M3U8 trực tiếp
+async function getStreamsFromSlug(slug) {
+  const cacheKey = `streams_${slug}`;
   if (appCache.has(cacheKey)) return appCache.get(cacheKey);
 
-  let movieTitle = appCache.get(`title_of_${id}`);
-
-  if (!movieTitle) {
-    if (id.startsWith("tmdb:")) {
-      const tmdbId = id.replace("tmdb:", "");
-      const detail = await getMovieDetailsFromTmdb(tmdbId);
-      if (detail) movieTitle = detail.title;
-    } else if (id.startsWith("tt")) {
-      try {
-        const findRes = await axios.get(`${TMDB_BASE_URL}/find/${id}`, {
-          params: { api_key: TMDB_API_KEY, external_source: "imdb_id", language: "vi-VN" }
-        });
-        if (findRes.data.movie_results && findRes.data.movie_results.length > 0) {
-          movieTitle = findRes.data.movie_results[0].title || findRes.data.movie_results[0].original_title;
-        }
-      } catch (e) {}
-    }
-  }
-
-  if (!movieTitle) return [];
-
   try {
-    const searchRes = await axios.get("https://phimapi.com/v1/api/tim-kiem", {
-      params: { keyword: movieTitle, limit: 5 },
-      timeout: 5000
-    });
-
-    const items = searchRes.data?.data?.items;
-    if (!items || items.length === 0) return [];
-
-    const slug = items[0].slug;
-    const detailRes = await axios.get(`https://phimapi.com/phim/${slug}`, { timeout: 5000 });
-    const episodes = detailRes.data?.episodes;
-
-    if (!episodes || episodes.length === 0) return [];
-
+    const res = await axios.get(`https://phimapi.com/phim/${slug}`, { timeout: 8000 });
+    const episodes = res.data?.episodes || [];
     const streams = [];
+
     episodes.forEach((server) => {
-      const serverName = server.server_name || "Server HD";
-      if (server.server_data && server.server_data.length > 0) {
+      const serverName = server.server_name || "Server Vietsub/HD";
+      if (server.server_data) {
         server.server_data.forEach((ep) => {
           if (ep.link_m3u8) {
             streams.push({
-              title: `[Phim Việt HD] - ${serverName}`,
+              title: `[Phim Việt HD] - ${serverName} (${ep.name || "Full"})`,
               url: ep.link_m3u8
             });
           }
@@ -236,23 +146,22 @@ async function getStreamsForMovie(id) {
 
 // Catalog Handler
 builder.defineCatalogHandler(async (args) => {
-  if (args.type === "movie" && args.id === "phimviet_imdb") {
+  if (args.id === "phimviet_all") {
     if (args.extra && args.extra.search) {
       const searchResults = await searchVietnameseMovies(args.extra.search);
-      return { metas: searchResults, cacheMaxAge: 1800 };
+      return { metas: searchResults };
     }
-
-    const selectedGenre = args.extra ? args.extra.genre : null;
-    const movies = await getVietnameseMovies(selectedGenre);
-    return { metas: movies, cacheMaxAge: 3600 };
+    const metas = await getVietnameseMoviesCatalog();
+    return { metas: metas };
   }
   return { metas: [] };
 });
 
 // Stream Handler
 builder.defineStreamHandler(async (args) => {
-  if (args.type === "movie") {
-    const streams = await getStreamsForMovie(args.id);
+  if (args.id.startsWith("phimapi:")) {
+    const slug = args.id.replace("phimapi:", "");
+    const streams = await getStreamsFromSlug(slug);
     return { streams: streams };
   }
   return { streams: [] };
