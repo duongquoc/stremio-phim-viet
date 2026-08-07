@@ -10,7 +10,7 @@ const AXIOS_CONFIG = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
     "Accept": "application/json, text/plain, */*"
   },
-  timeout: 8000
+  timeout: 10000 // Tăng thời gian chờ để tải nhiều phim hơn
 };
 
 const GENRE_SLUGS = {
@@ -34,10 +34,10 @@ const COUNTRY_SLUGS = {
 };
 
 const manifest = {
-  id: "org.phimtonghop.v300",
-  version: "3.0.0",
-  name: "Kho Phim Tổng Hợp (Việt & Ngoại)",
-  description: "Phim Việt Nam & Nước Ngoài - Phân loại Thể Loại, Quốc Gia & Năm",
+  id: "org.phimtonghop.v310",
+  version: "3.1.0",
+  name: "Kho Phim Tổng Hợp HD",
+  description: "Tăng cường 500+ Phim mỗi danh mục & Bộ lọc năm cũ",
   resources: ["catalog", "meta", "stream"],
   types: ["movie", "series"],
   idPrefixes: ["phimapi:"],
@@ -50,7 +50,7 @@ const manifest = {
         {
           name: "genre",
           options: [
-            "Tất cả", "2026", "2025", "2024", "2023", "2022", "2021",
+            "Tất cả", "2026", "2025", "2024", "2023", "2022", "2021", "2020", "2019", "2018", "2015", "2010",
             "Hành động", "Hài hước", "Tình cảm", "Kinh dị", "Tâm lý"
           ],
           isRequired: false
@@ -68,7 +68,7 @@ const manifest = {
           options: [
             "Âu Mỹ", "Hàn Quốc", "Trung Quốc", "Nhật Bản",
             "Hành động", "Kinh dị", "Viễn tưởng", "Hài hước", "Tình cảm", "Võ thuật", "Cổ trang",
-            "2026", "2025", "2024", "2023"
+            "2026", "2025", "2024", "2023", "2022", "2021", "2020", "2019", "2018", "2015", "2010"
           ],
           isRequired: false
         },
@@ -86,7 +86,8 @@ function formatImageUrl(path) {
   return `${PHIM_IMG_BASE}${path}`;
 }
 
-async function fetchItemsFromUrl(baseUrl, numPages = 6) {
+// Quét sâu 25 trang dữ liệu cùng lúc
+async function fetchItemsFromUrl(baseUrl, numPages = 25) {
   const pageNumbers = Array.from({ length: numPages }, (_, i) => i + 1);
   const requests = pageNumbers.map((page) =>
     axios.get(`${baseUrl}${baseUrl.includes("?") ? "&" : "?"}page=${page}`, AXIOS_CONFIG)
@@ -149,16 +150,15 @@ async function getCatalog(catalogId, selectedGenre) {
     }
   }
 
-  let items = await fetchItemsFromUrl(targetUrl, 8);
+  // Lấy dữ liệu với độ sâu 25 trang
+  let items = await fetchItemsFromUrl(targetUrl, 25);
 
-  // Lọc chuẩn lại quốc gia nếu đang chọn ở mục Phim Việt
   if (catalogId === "phim_vietnam" && selectedGenre && GENRE_SLUGS[selectedGenre]) {
     items = items.filter((item) =>
       item.country?.some((c) => c.name === "Việt Nam" || c.slug === "viet-nam")
     );
   }
 
-  // Lọc theo năm chọn
   if (isYearFilter && targetYear) {
     items = items.filter((item) => item.year === targetYear);
   }
@@ -174,7 +174,7 @@ async function searchMovies(query) {
   if (appCache.has(cacheKey)) return appCache.get(cacheKey);
 
   try {
-    const res = await axios.get(`https://phimapi.com/v1/api/tim-kiem?keyword=${encodeURIComponent(query)}&limit=30`, AXIOS_CONFIG);
+    const res = await axios.get(`https://phimapi.com/v1/api/tim-kiem?keyword=${encodeURIComponent(query)}&limit=40`, AXIOS_CONFIG);
     const items = res.data?.data?.items || [];
     const metas = convertItemsToMetas(items);
 
@@ -219,7 +219,7 @@ async function getMetaFromSlug(slug) {
 
 // 4. Stream Handler
 async function getStreamsFromSlug(slug) {
-  const cacheKey = `streams_v30_${slug}`;
+  const cacheKey = `streams_v31_${slug}`;
   if (appCache.has(cacheKey)) return appCache.get(cacheKey);
 
   let episodes = [];
@@ -264,13 +264,12 @@ async function getStreamsFromSlug(slug) {
   return streams;
 }
 
-// Register Handlers
+// Đăng ký các Handler
 builder.defineCatalogHandler(async (args) => {
   if (args.extra && args.extra.search) {
     const searchResults = await searchMovies(args.extra.search);
     return { metas: searchResults };
   }
-
   const selectedGenre = args.extra ? args.extra.genre : null;
   const metas = await getCatalog(args.id, selectedGenre);
   return { metas: metas };
@@ -298,5 +297,5 @@ builder.defineStreamHandler(async (args) => {
 
 const PORT = process.env.PORT || 7000;
 serveHTTP(builder.getInterface(), { port: PORT }).then(({ url }) => {
-  console.log(`Addon v3.0.0 đang chạy tại: ${url}manifest.json`);
+  console.log(`Addon v3.1.0 đang chạy tại: ${url}manifest.json`);
 });
