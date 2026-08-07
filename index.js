@@ -14,13 +14,13 @@ const AXIOS_CONFIG = {
 };
 
 const manifest = {
-  id: "org.phimvietnam.fullarchive.v16",
-  version: "1.6.0",
-  name: "Phim Việt Nam (Kho Cũ & Mới)",
-  description: "Tổng hợp Phim Việt Nam (Cũ & Mới) - Phát HD Trực Tiếp",
+  id: "org.phimvietnam.v170", // Manifest ID mới hoàn toàn để xóa cache Stremio
+  version: "1.7.0",
+  name: "Phim Việt Nam HD",
+  description: "Kho Phim Việt Nam (Cũ & Mới) - Phát HD Trực Tiếp",
   resources: ["catalog", "stream"],
   types: ["movie", "series"],
-  idPrefixes: ["phimapi:"], // Khai báo bắt buộc để Stremio gửi yêu cầu Stream
+  idPrefixes: ["phimapi:"],
   catalogs: [
     {
       type: "movie",
@@ -41,7 +41,7 @@ function formatImageUrl(path) {
 
 // 1. Catalog Handler
 async function getVietnameseMoviesCatalog() {
-  const cacheKey = "phim_viet_catalog_v160";
+  const cacheKey = "phim_viet_catalog_v170";
   if (appCache.has(cacheKey)) return appCache.get(cacheKey);
 
   try {
@@ -61,7 +61,7 @@ async function getVietnameseMoviesCatalog() {
 
     const metas = allItems.map((item) => ({
       id: `phimapi:${item.slug}`,
-      type: "movie", // Ép chuẩn định dạng Movie để phát trực tiếp
+      type: "movie",
       name: item.name || item.origin_name,
       poster: formatImageUrl(item.poster_url || item.thumb_url),
       background: formatImageUrl(item.thumb_url || item.poster_url),
@@ -101,14 +101,13 @@ async function searchVietnameseMovies(query) {
   }
 }
 
-// 3. Stream Handler (Bóc tách ID chuẩn xác)
+// 3. Stream Handler
 async function getStreamsFromSlug(slug) {
-  const cacheKey = `streams_v16_${slug}`;
+  const cacheKey = `streams_v17_${slug}`;
   if (appCache.has(cacheKey)) return appCache.get(cacheKey);
 
   let episodes = [];
 
-  // Lấy dữ liệu từ PhimAPI
   try {
     const res = await axios.get(`https://phimapi.com/phim/${slug}`, AXIOS_CONFIG);
     if (res.data?.episodes && res.data.episodes.length > 0) {
@@ -116,7 +115,6 @@ async function getStreamsFromSlug(slug) {
     }
   } catch (e) {}
 
-  // Server dự phòng (OPhim)
   if (episodes.length === 0) {
     try {
       const resFallback = await axios.get(`https://ophim1.com/phim/${slug}`, AXIOS_CONFIG);
@@ -135,7 +133,7 @@ async function getStreamsFromSlug(slug) {
         if (ep.link_m3u8) {
           streams.push({
             name: "PHIM VIỆT HD",
-            title: `${serverName} - ${ep.name || "Full"}\n▶ Bấm để xem phim`,
+            title: `${serverName} - ${ep.name || "Full"}\n▶ Bấm để xem ngay`,
             url: ep.link_m3u8
           });
         }
@@ -163,11 +161,10 @@ builder.defineCatalogHandler(async (args) => {
   return { metas: [] };
 });
 
-// Register Stream Handler
+// Register Stream Handler (Xử lý linh hoạt cả Movie và Series)
 builder.defineStreamHandler(async (args) => {
-  if (args.id.startsWith("phimapi:")) {
-    // Xử lý tách chuỗi để lấy đúng slug phim
-    const cleanId = args.id.replace("phimapi:", "");
+  if (args.id && args.id.includes("phimapi:")) {
+    const cleanId = args.id.substring(args.id.indexOf("phimapi:") + 8);
     const slug = cleanId.split(":")[0];
     const streams = await getStreamsFromSlug(slug);
     return { streams: streams };
@@ -177,5 +174,5 @@ builder.defineStreamHandler(async (args) => {
 
 const PORT = process.env.PORT || 7000;
 serveHTTP(builder.getInterface(), { port: PORT }).then(({ url }) => {
-  console.log(`Addon v1.6.0 đang chạy tại: ${url}manifest.json`);
+  console.log(`Addon v1.7.0 đang chạy tại: ${url}manifest.json`);
 });
