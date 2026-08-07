@@ -14,11 +14,11 @@ const AXIOS_CONFIG = {
 };
 
 const manifest = {
-  id: "org.phimvietnam.v170", // Manifest ID mới hoàn toàn để xóa cache Stremio
-  version: "1.7.0",
+  id: "org.phimvietnam.v200",
+  version: "2.0.0",
   name: "Phim Việt Nam HD",
-  description: "Kho Phim Việt Nam (Cũ & Mới) - Phát HD Trực Tiếp",
-  resources: ["catalog", "stream"],
+  description: "Kho Phim Việt Nam (Cũ & Mới) - Hỗ trợ đầy đủ Meta & Phát HD",
+  resources: ["catalog", "meta", "stream"], // Bổ sung resource "meta" bắt buộc
   types: ["movie", "series"],
   idPrefixes: ["phimapi:"],
   catalogs: [
@@ -41,7 +41,7 @@ function formatImageUrl(path) {
 
 // 1. Catalog Handler
 async function getVietnameseMoviesCatalog() {
-  const cacheKey = "phim_viet_catalog_v170";
+  const cacheKey = "phim_viet_catalog_v200";
   if (appCache.has(cacheKey)) return appCache.get(cacheKey);
 
   try {
@@ -76,34 +76,41 @@ async function getVietnameseMoviesCatalog() {
   }
 }
 
-// 2. Search Handler
-async function searchVietnameseMovies(query) {
-  const cacheKey = `search_phimapi_${query.toLowerCase().trim()}`;
+// 2. Meta Handler (Xử lý tải chi tiết phim khi nhấp vào poster)
+async function getMetaFromSlug(slug) {
+  const cacheKey = `meta_detail_${slug}`;
   if (appCache.has(cacheKey)) return appCache.get(cacheKey);
 
   try {
-    const res = await axios.get(`https://phimapi.com/v1/api/tim-kiem?keyword=${encodeURIComponent(query)}&limit=20`, AXIOS_CONFIG);
-    const items = res.data?.data?.items || [];
-    const metas = items.map((item) => ({
-      id: `phimapi:${item.slug}`,
-      type: "movie",
-      name: item.name || item.origin_name,
-      poster: formatImageUrl(item.poster_url || item.thumb_url),
-      background: formatImageUrl(item.thumb_url || item.poster_url),
-      description: `Năm: ${item.year || "N/A"}`,
-      releaseInfo: item.year ? String(item.year) : ""
-    }));
+    const res = await axios.get(`https://phimapi.com/phim/${slug}`, AXIOS_CONFIG);
+    const movie = res.data?.movie;
+    if (!movie) return null;
 
-    appCache.set(cacheKey, metas, 3600);
-    return metas;
-  } catch (error) {
-    return [];
+    const cleanDescription = movie.content 
+      ? movie.content.replace(/<[^>]*>?/gm, "") 
+      : `Tên gốc: ${movie.origin_name || movie.name} | Năm: ${movie.year || "N/A"}`;
+
+    const meta = {
+      id: `phimapi:${slug}`,
+      type: "movie",
+      name: movie.name || movie.origin_name,
+      poster: formatImageUrl(movie.poster_url || movie.thumb_url),
+      background: formatImageUrl(movie.thumb_url || movie.poster_url),
+      description: cleanDescription,
+      releaseInfo: movie.year ? String(movie.year) : "",
+      genres: movie.category ? movie.category.map((c) => c.name) : ["Phim Việt"]
+    };
+
+    appCache.set(cacheKey, meta, 86400);
+    return meta;
+  } catch (e) {
+    return null;
   }
 }
 
-// 3. Stream Handler
+// 3. Stream Handler (Tải link video)
 async function getStreamsFromSlug(slug) {
-  const cacheKey = `streams_v17_${slug}`;
+  const cacheKey = `streams_v20_${slug}`;
   if (appCache.has(cacheKey)) return appCache.get(cacheKey);
 
   let episodes = [];
@@ -148,20 +155,25 @@ async function getStreamsFromSlug(slug) {
   return streams;
 }
 
-// Register Catalog Handler
+// Register Handlers
 builder.defineCatalogHandler(async (args) => {
   if (args.id === "phimviet_all") {
-    if (args.extra && args.extra.search) {
-      const searchResults = await searchVietnameseMovies(args.extra.search);
-      return { metas: searchResults };
-    }
     const metas = await getVietnameseMoviesCatalog();
     return { metas: metas };
   }
   return { metas: [] };
 });
 
-// Register Stream Handler (Xử lý linh hoạt cả Movie và Series)
+builder.defineMetaHandler(async (args) => {
+  if (args.id && args.id.includes("phimapi:")) {
+    const cleanId = args.id.substring(args.id.indexOf("phimapi:") + 8);
+    const slug = cleanId.split(":")[0];
+    const meta = await getMetaFromSlug(slug);
+    if (meta) return { meta: meta };
+  }
+  return { meta: {} };
+});
+
 builder.defineStreamHandler(async (args) => {
   if (args.id && args.id.includes("phimapi:")) {
     const cleanId = args.id.substring(args.id.indexOf("phimapi:") + 8);
@@ -174,5 +186,5 @@ builder.defineStreamHandler(async (args) => {
 
 const PORT = process.env.PORT || 7000;
 serveHTTP(builder.getInterface(), { port: PORT }).then(({ url }) => {
-  console.log(`Addon v1.7.0 đang chạy tại: ${url}manifest.json`);
+  console.log(`Addon v2.0.0 đang chạy tại: ${url}manifest.json`);
 });
