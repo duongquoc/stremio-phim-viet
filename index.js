@@ -330,5 +330,5 @@ builder.defineStreamHandler(async (args) => {
 // ============ KHỞI CHẠY ============
 const PORT = process.env.PORT || 7000;
 serveHTTP(builder.getInterface(), { port: PORT }).then(({ url }) => {
-  console.log(`Addon v3.2.0 (Bản Tối Ưu) đang chạy tại: ${url}manifest.json`);
+  console.log(`Addon v3.2.1 (Bản Tối Ưu) đang chạy tại: ${url}manifest.json`);
 });
