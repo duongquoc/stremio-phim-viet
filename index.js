@@ -40,7 +40,7 @@ const COUNTRY_SLUGS = {
 
 const manifest = {
   id: "org.phimtonghop.v320",
-  version: "3.2.0",
+  version: "3.2.1",
   name: "Kho Phim Tổng Hợp HD",
   description: "Bổ sung Rating & Tối ưu luồng xử lý cực nhanh (Final)",
   resources: ["catalog", "meta", "stream"],
