@@ -10,12 +10,12 @@ const AXIOS_CONFIG = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
     "Accept": "application/json, text/plain, */*"
   },
-  timeout: 10000 // Tối đa 10s cho các API data
+  timeout: 10000 
 };
 
 const STREAM_AXIOS_CONFIG = {
   ...AXIOS_CONFIG,
-  timeout: 6000 // Ép thời gian lấy link Stream xuống 6s để Stremio không bị quay đều
+  timeout: 6000 
 };
 
 const GENRE_SLUGS = {
@@ -40,9 +40,9 @@ const COUNTRY_SLUGS = {
 
 const manifest = {
   id: "org.phimtonghop.v320",
-  version: "3.2.1",
+  version: "3.2.0",
   name: "Kho Phim Tổng Hợp HD",
-  description: "Bổ sung Rating & Tối ưu luồng xử lý cực nhanh (Final)",
+  description: "Bản Cực Phẩm: Đua tốc độ (Promise.any) & Hiển thị Điểm IMDb",
   resources: ["catalog", "meta", "stream"],
   types: ["movie", "series"],
   idPrefixes: ["phimapi:"],
@@ -91,7 +91,7 @@ function formatImageUrl(path) {
   return `${PHIM_IMG_BASE}${path}`;
 }
 
-// Cơ chế Chunking: Chia nhỏ request tải danh sách phim để chống nghẽn / chống Ban IP
+// 1. Tải danh sách phim (Chia lô - Chunking để chống ban IP)
 async function fetchItemsFromUrl(baseUrl, numPages = 25) {
   const allItems = [];
   const chunkSize = 5; 
@@ -114,16 +114,20 @@ async function fetchItemsFromUrl(baseUrl, numPages = 25) {
   return allItems;
 }
 
+// 2. Định dạng dữ liệu Meta (Chèn điểm IMDb vào thẳng Tên Phim)
 function convertItemsToMetas(items) {
   return items.map((item) => {
     let rating = "N/A";
     if (item.tmdb?.vote_average) rating = item.tmdb.vote_average;
     else if (item.imdb?.rating) rating = item.imdb.rating;
 
+    const baseName = item.name || item.origin_name;
+
     return {
       id: `phimapi:${item.slug}`,
       type: "movie",
-      name: item.name || item.origin_name,
+      // Hiển thị Điểm Đánh Giá ngay ngoài trang chủ Stremio
+      name: rating !== "N/A" ? `${baseName} [⭐ ${rating}]` : baseName,
       poster: formatImageUrl(item.poster_url || item.thumb_url),
       background: formatImageUrl(item.thumb_url || item.poster_url),
       description: rating !== "N/A" 
@@ -135,16 +139,33 @@ function convertItemsToMetas(items) {
   });
 }
 
-// 1. Catalog Handler
-async function getCatalog(catalogId, selectedGenre) {
-  const cacheKey = `cat_${catalogId}_${selectedGenre || "all"}`;
-  if (appCache.has(cacheKey)) return appCache.get(cacheKey);
+// ============ HANDLERS ============
+
+builder.defineCatalogHandler(async (args) => {
+  if (args.extra?.search) {
+    const cacheKey = `search_phimapi_${args.extra.search.toLowerCase().trim()}`;
+    if (appCache.has(cacheKey)) return { metas: appCache.get(cacheKey) };
+
+    try {
+      const res = await axios.get(`https://phimapi.com/v1/api/tim-kiem?keyword=${encodeURIComponent(args.extra.search)}&limit=40`, AXIOS_CONFIG);
+      const items = res.data?.data?.items || [];
+      const metas = convertItemsToMetas(items);
+      appCache.set(cacheKey, metas, 3600);
+      return { metas: metas };
+    } catch (error) {
+      return { metas: [] };
+    }
+  }
+
+  const selectedGenre = args.extra?.genre || null;
+  const cacheKey = `cat_${args.id}_${selectedGenre || "all"}`;
+  if (appCache.has(cacheKey)) return { metas: appCache.get(cacheKey) };
 
   let targetUrl = "";
   let isYearFilter = false;
   let targetYear = null;
 
-  if (catalogId === "phim_vietnam") {
+  if (args.id === "phim_vietnam") {
     if (selectedGenre && !isNaN(selectedGenre)) {
       isYearFilter = true;
       targetYear = parseInt(selectedGenre);
@@ -154,7 +175,7 @@ async function getCatalog(catalogId, selectedGenre) {
     } else {
       targetUrl = "https://phimapi.com/v1/api/quoc-gia/viet-nam";
     }
-  } else if (catalogId === "phim_nuocngoai") {
+  } else if (args.id === "phim_nuocngoai") {
     if (selectedGenre && COUNTRY_SLUGS[selectedGenre]) {
       targetUrl = `https://phimapi.com/v1/api/quoc-gia/${COUNTRY_SLUGS[selectedGenre]}`;
     } else if (selectedGenre && GENRE_SLUGS[selectedGenre]) {
@@ -170,7 +191,7 @@ async function getCatalog(catalogId, selectedGenre) {
 
   let items = await fetchItemsFromUrl(targetUrl, 25);
 
-  if (catalogId === "phim_vietnam" && selectedGenre && GENRE_SLUGS[selectedGenre]) {
+  if (args.id === "phim_vietnam" && selectedGenre && GENRE_SLUGS[selectedGenre]) {
     items = items.filter((item) =>
       item.country?.some((c) => c.name === "Việt Nam" || c.slug === "viet-nam")
     );
@@ -181,154 +202,115 @@ async function getCatalog(catalogId, selectedGenre) {
   }
 
   const metas = convertItemsToMetas(items);
-  appCache.set(cacheKey, metas, 14400); // Lưu 4 tiếng
-  return metas;
-}
-
-// 2. Search Handler
-async function searchMovies(query) {
-  const cacheKey = `search_phimapi_${query.toLowerCase().trim()}`;
-  if (appCache.has(cacheKey)) return appCache.get(cacheKey);
-
-  try {
-    const res = await axios.get(`https://phimapi.com/v1/api/tim-kiem?keyword=${encodeURIComponent(query)}&limit=40`, AXIOS_CONFIG);
-    const items = res.data?.data?.items || [];
-    const metas = convertItemsToMetas(items);
-
-    appCache.set(cacheKey, metas, 3600);
-    return metas;
-  } catch (error) {
-    console.error(`[Lỗi Tìm Kiếm] ${query}:`, error.message);
-    return [];
-  }
-}
-
-// 3. Meta Handler
-async function getMetaFromSlug(slug) {
-  const cacheKey = `meta_detail_${slug}`;
-  if (appCache.has(cacheKey)) return appCache.get(cacheKey);
-
-  try {
-    const res = await axios.get(`https://phimapi.com/phim/${slug}`, AXIOS_CONFIG);
-    const movie = res.data?.movie;
-    if (!movie) return null;
-
-    let rating = "N/A";
-    if (movie.tmdb?.vote_average) rating = movie.tmdb.vote_average;
-    else if (movie.imdb?.rating) rating = movie.imdb.rating;
-
-    const ratingText = rating !== "N/A" ? `⭐ ĐIỂM ĐÁNH GIÁ: ${rating}/10\n\n` : "";
-    const cleanDescription = movie.content
-      ? movie.content.replace(/<[^>]*>?/gm, "")
-      : `Tên gốc: ${movie.origin_name || movie.name} | Năm: ${movie.year || "N/A"}`;
-
-    const meta = {
-      id: `phimapi:${slug}`,
-      type: "movie", // Cố định là movie để list các tập dạng streams thay vì videos
-      name: movie.name || movie.origin_name,
-      poster: formatImageUrl(movie.poster_url || movie.thumb_url),
-      background: formatImageUrl(movie.thumb_url || movie.poster_url),
-      description: `${ratingText}${cleanDescription}`,
-      releaseInfo: movie.year ? String(movie.year) : "",
-      genres: movie.category ? movie.category.map((c) => c.name) : ["Phim"],
-      imdbRating: rating !== "N/A" ? String(rating) : undefined
-    };
-
-    appCache.set(cacheKey, meta, 86400); // Cập nhật cache meta lâu hơn, 1 ngày
-    return meta;
-  } catch (e) {
-    return null;
-  }
-}
-
-// 4. Stream Handler (Quét đồng thời nhiều API để lấy link nhanh nhất)
-async function getStreamsFromSlug(slug) {
-  const cacheKey = `streams_v32_fallback_${slug}`;
-  if (appCache.has(cacheKey)) return appCache.get(cacheKey);
-
-  let episodes = [];
-  const sourceEndpoints = [
-    `https://phimapi.com/phim/${slug}`,
-    `https://ophim1.com/phim/${slug}`,
-    `https://kkphim.vip/phim/${slug}`
-  ];
-
-  const requests = sourceEndpoints.map(url => 
-    axios.get(url, STREAM_AXIOS_CONFIG).catch(() => null)
-  );
-  
-  const responses = await Promise.all(requests);
-
-  for (let i = 0; i < responses.length; i++) {
-    const res = responses[i];
-    if (res?.data?.episodes?.length > 0) {
-      episodes = res.data.episodes;
-      console.log(`[Thành công] Lấy link tại nguồn số ${i + 1}: ${sourceEndpoints[i]}`);
-      break; 
-    }
-  }
-
-  const streams = [];
-  episodes.forEach((server) => {
-    const serverName = server.server_name || "Server HD";
-    if (server.server_data) {
-      server.server_data.forEach((ep) => {
-        if (ep.link_m3u8) {
-          streams.push({
-            name: "PHIM HD",
-            title: `${serverName} - ${ep.name || "Full"}\n▶ Bấm để xem ngay`,
-            url: ep.link_m3u8
-          });
-        }
-      });
-    }
-  });
-
-  if (streams.length > 0) {
-    appCache.set(cacheKey, streams, 7200); 
-  }
-  
-  return streams;
-}
-
-// ============ ĐĂNG KÝ HANDLERS ============
-
-builder.defineCatalogHandler(async (args) => {
-  if (args.extra?.search) {
-    const searchResults = await searchMovies(args.extra.search);
-    return { metas: searchResults };
-  }
-  const selectedGenre = args.extra?.genre || null;
-  const metas = await getCatalog(args.id, selectedGenre);
+  appCache.set(cacheKey, metas, 14400); 
   return { metas: metas };
 });
 
 builder.defineMetaHandler(async (args) => {
   if (args.id?.startsWith("phimapi:")) {
-    // Sửa lỗi cực kỳ quan trọng: Loại bỏ các hậu tố :1:1 (Mùa:Tập) do Stremio tự sinh ra
-    const cleanId = args.id.replace("phimapi:", "");
-    const slug = cleanId.split(":")[0]; 
-    
-    const meta = await getMetaFromSlug(slug);
-    if (meta) return { meta: meta };
+    const slug = args.id.replace("phimapi:", "").split(":")[0]; 
+    const cacheKey = `meta_detail_${slug}`;
+    if (appCache.has(cacheKey)) return { meta: appCache.get(cacheKey) };
+
+    try {
+      const res = await axios.get(`https://phimapi.com/phim/${slug}`, AXIOS_CONFIG);
+      const movie = res.data?.movie;
+      if (!movie) return { meta: {} };
+
+      let rating = "N/A";
+      if (movie.tmdb?.vote_average) rating = movie.tmdb.vote_average;
+      else if (movie.imdb?.rating) rating = movie.imdb.rating;
+
+      const ratingText = rating !== "N/A" ? `⭐ ĐIỂM ĐÁNH GIÁ: ${rating}/10\n\n` : "";
+      const cleanDescription = movie.content
+        ? movie.content.replace(/<[^>]*>?/gm, "")
+        : `Tên gốc: ${movie.origin_name || movie.name} | Năm: ${movie.year || "N/A"}`;
+
+      const baseName = movie.name || movie.origin_name;
+
+      const meta = {
+        id: `phimapi:${slug}`,
+        type: "movie",
+        name: rating !== "N/A" ? `${baseName} [⭐ ${rating}]` : baseName,
+        poster: formatImageUrl(movie.poster_url || movie.thumb_url),
+        background: formatImageUrl(movie.thumb_url || movie.poster_url),
+        description: `${ratingText}${cleanDescription}`,
+        releaseInfo: movie.year ? String(movie.year) : "",
+        genres: movie.category ? movie.category.map((c) => c.name) : ["Phim"],
+        imdbRating: rating !== "N/A" ? String(rating) : undefined
+      };
+
+      appCache.set(cacheKey, meta, 86400); 
+      return { meta: meta };
+    } catch (e) {
+      return { meta: {} };
+    }
   }
   return { meta: {} };
 });
 
+// THAY ĐỔI LỚN NHẤT: Hàm lấy Link siêu tốc với Promise.any
 builder.defineStreamHandler(async (args) => {
   if (args.id?.startsWith("phimapi:")) {
-    // Sửa lỗi: Đảm bảo chỉ dùng đúng slug gốc để tìm link m3u8
-    const cleanId = args.id.replace("phimapi:", "");
-    const slug = cleanId.split(":")[0];
+    const slug = args.id.replace("phimapi:", "").split(":")[0];
+    const cacheKey = `streams_fast_v32_${slug}`;
+    if (appCache.has(cacheKey)) return { streams: appCache.get(cacheKey) };
 
-    const streams = await getStreamsFromSlug(slug);
+    const sourceEndpoints = [
+      `https://phimapi.com/phim/${slug}`,
+      `https://ophim1.com/phim/${slug}`,
+      `https://kkphim.vip/phim/${slug}`,
+      `https://phim.nguonc.com/api/film/${slug}` // Đã tích hợp Nguồn C
+    ];
+
+    // Tạo các cuộc đua (Requests)
+    const requests = sourceEndpoints.map(url => 
+      axios.get(url, STREAM_AXIOS_CONFIG).then(res => {
+        // Hỗ trợ cả 2 chuẩn API (episodes nằm ngoài hoặc nằm trong movie)
+        const eps = res.data?.episodes || res.data?.movie?.episodes;
+        if (eps && eps.length > 0) {
+          return eps; // Nếu có link, trả về luôn để chiến thắng cuộc đua
+        }
+        throw new Error("Nguồn này không có phim"); // Loại nguồn này ra
+      })
+    );
+    
+    let episodes = [];
+    try {
+      // PROMISE.ANY: Chốt ngay ông nào chạy về đích đầu tiên! Bỏ mặc các ông còn lại.
+      episodes = await Promise.any(requests);
+    } catch (error) {
+      // Lỗi này chỉ xảy ra khi CẢ 4 SERVER cùng sập hoặc cùng không có phim này
+      console.log(`[Thất bại] Toàn bộ nguồn đều không có phim: ${slug}`);
+      return { streams: [] };
+    }
+
+    const streams = [];
+    episodes.forEach((server) => {
+      const serverName = server.server_name || "Server HD";
+      if (server.server_data) {
+        server.server_data.forEach((ep) => {
+          if (ep.link_m3u8) {
+            streams.push({
+              name: "PHIM HD",
+              title: `${serverName} - ${ep.name || "Full"}\n▶ Bấm để xem ngay`,
+              url: ep.link_m3u8
+            });
+          }
+        });
+      }
+    });
+
+    if (streams.length > 0) {
+      appCache.set(cacheKey, streams, 7200); 
+    }
+    
     return { streams: streams };
   }
   return { streams: [] };
 });
 
-// ============ KHỞI CHẠY ============
 const PORT = process.env.PORT || 7000;
 serveHTTP(builder.getInterface(), { port: PORT }).then(({ url }) => {
-  console.log(`Addon v3.2.1 (Bản Tối Ưu) đang chạy tại: ${url}manifest.json`);
+  console.log(`Addon Siêu Tốc v3.2.0 đang chạy tại: ${url}manifest.json`);
 });
