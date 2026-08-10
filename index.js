@@ -40,9 +40,9 @@ const COUNTRY_SLUGS = {
 
 const manifest = {
   id: "org.phimtonghop.v320",
-  version: "3.2.1",
+  version: "3.2.0",
   name: "Kho Phim Tổng Hợp HD",
-  description: "Bản Cực Phẩm: Đua tốc độ (Promise.any) & Hiển thị Điểm IMDb",
+  description: "Bản Gộp Nguồn Tối Đa: Tự động gom link từ 4 server phim lớn nhất",
   resources: ["catalog", "meta", "stream"],
   types: ["movie", "series"],
   idPrefixes: ["phimapi:"],
@@ -91,7 +91,7 @@ function formatImageUrl(path) {
   return `${PHIM_IMG_BASE}${path}`;
 }
 
-// 1. Tải danh sách phim (Chia lô - Chunking để chống ban IP)
+// Tải danh sách phim chia nhỏ lô request
 async function fetchItemsFromUrl(baseUrl, numPages = 25) {
   const allItems = [];
   const chunkSize = 5; 
@@ -114,7 +114,6 @@ async function fetchItemsFromUrl(baseUrl, numPages = 25) {
   return allItems;
 }
 
-// 2. Định dạng dữ liệu Meta (Chèn điểm IMDb vào thẳng Tên Phim)
 function convertItemsToMetas(items) {
   return items.map((item) => {
     let rating = "N/A";
@@ -126,7 +125,6 @@ function convertItemsToMetas(items) {
     return {
       id: `phimapi:${item.slug}`,
       type: "movie",
-      // Hiển thị Điểm Đánh Giá ngay ngoài trang chủ Stremio
       name: rating !== "N/A" ? `${baseName} [⭐ ${rating}]` : baseName,
       poster: formatImageUrl(item.poster_url || item.thumb_url),
       background: formatImageUrl(item.thumb_url || item.poster_url),
@@ -249,52 +247,48 @@ builder.defineMetaHandler(async (args) => {
   return { meta: {} };
 });
 
-// THAY ĐỔI LỚN NHẤT: Hàm lấy Link siêu tốc với Promise.any
+// STREAM HANDLER: Gom toàn bộ nguồn phim từ cả 4 API
 builder.defineStreamHandler(async (args) => {
   if (args.id?.startsWith("phimapi:")) {
     const slug = args.id.replace("phimapi:", "").split(":")[0];
-    const cacheKey = `streams_fast_v32_${slug}`;
+    const cacheKey = `streams_aggregated_v34_${slug}`;
     if (appCache.has(cacheKey)) return { streams: appCache.get(cacheKey) };
 
     const sourceEndpoints = [
-      `https://phimapi.com/phim/${slug}`,
-      `https://ophim1.com/phim/${slug}`,
-      `https://kkphim.vip/phim/${slug}`,
-      `https://phim.nguonc.com/api/film/${slug}` // Đã tích hợp Nguồn C
+      { name: "PhimAPI", url: `https://phimapi.com/phim/${slug}` },
+      { name: "Ophim", url: `https://ophim1.com/phim/${slug}` },
+      { name: "KKPhim", url: `https://kkphim.vip/phim/${slug}` },
+      { name: "Nguồn C", url: `https://phim.nguonc.com/api/film/${slug}` }
     ];
 
-    // Tạo các cuộc đua (Requests)
-    const requests = sourceEndpoints.map(url => 
-      axios.get(url, STREAM_AXIOS_CONFIG).then(res => {
-        // Hỗ trợ cả 2 chuẩn API (episodes nằm ngoài hoặc nằm trong movie)
-        const eps = res.data?.episodes || res.data?.movie?.episodes;
-        if (eps && eps.length > 0) {
-          return eps; // Nếu có link, trả về luôn để chiến thắng cuộc đua
-        }
-        throw new Error("Nguồn này không có phim"); // Loại nguồn này ra
-      })
+    // Bắn request tới tất cả nguồn cùng lúc, không làm crash nếu có nguồn sập
+    const requests = sourceEndpoints.map(src => 
+      axios.get(src.url, STREAM_AXIOS_CONFIG)
+        .then(res => ({
+          source: src.name,
+          episodes: res.data?.episodes || res.data?.movie?.episodes || []
+        }))
+        .catch(() => ({ source: src.name, episodes: [] }))
     );
-    
-    let episodes = [];
-    try {
-      // PROMISE.ANY: Chốt ngay ông nào chạy về đích đầu tiên! Bỏ mặc các ông còn lại.
-      episodes = await Promise.any(requests);
-    } catch (error) {
-      // Lỗi này chỉ xảy ra khi CẢ 4 SERVER cùng sập hoặc cùng không có phim này
-      console.log(`[Thất bại] Toàn bộ nguồn đều không có phim: ${slug}`);
-      return { streams: [] };
-    }
 
+    const results = await Promise.all(requests);
     const streams = [];
-    episodes.forEach((server) => {
-      const serverName = server.server_name || "Server HD";
-      if (server.server_data) {
-        server.server_data.forEach((ep) => {
-          if (ep.link_m3u8) {
-            streams.push({
-              name: "PHIM HD",
-              title: `${serverName} - ${ep.name || "Full"}\n▶ Bấm để xem ngay`,
-              url: ep.link_m3u8
+    const seenUrls = new Set(); // Lọc trùng lặp link m3u8
+
+    results.forEach(item => {
+      if (item.episodes && item.episodes.length > 0) {
+        item.episodes.forEach(server => {
+          const serverName = server.server_name || "Server HD";
+          if (server.server_data) {
+            server.server_data.forEach(ep => {
+              if (ep.link_m3u8 && !seenUrls.has(ep.link_m3u8)) {
+                seenUrls.add(ep.link_m3u8);
+                streams.push({
+                  name: `[${item.source}]`,
+                  title: `${serverName} - ${ep.name || "Full"}\n▶ Bấm để xem ngay`,
+                  url: ep.link_m3u8
+                });
+              }
             });
           }
         });
@@ -312,5 +306,5 @@ builder.defineStreamHandler(async (args) => {
 
 const PORT = process.env.PORT || 7000;
 serveHTTP(builder.getInterface(), { port: PORT }).then(({ url }) => {
-  console.log(`Addon Siêu Tốc v3.2.1 đang chạy tại: ${url}manifest.json`);
+  console.log(`Addon Gom Nguồn v3.2.0 đang chạy tại: ${url}manifest.json`);
 });
