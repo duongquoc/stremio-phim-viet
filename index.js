@@ -40,7 +40,7 @@ const COUNTRY_SLUGS = {
 
 const manifest = {
   id: "org.phimtonghop.v320",
-  version: "3.2.0",
+  version: "3.2.1",
   name: "Kho Phim Tổng Hợp HD",
   description: "Bản Cực Phẩm: Đua tốc độ (Promise.any) & Hiển thị Điểm IMDb",
   resources: ["catalog", "meta", "stream"],
@@ -312,5 +312,5 @@ builder.defineStreamHandler(async (args) => {
 
 const PORT = process.env.PORT || 7000;
 serveHTTP(builder.getInterface(), { port: PORT }).then(({ url }) => {
-  console.log(`Addon Siêu Tốc v3.2.0 đang chạy tại: ${url}manifest.json`);
+  console.log(`Addon Siêu Tốc v3.2.1 đang chạy tại: ${url}manifest.json`);
 });
