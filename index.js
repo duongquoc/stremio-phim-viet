@@ -254,16 +254,17 @@ builder.defineStreamHandler(async (args) => {
     const cacheKey = `streams_aggregated_v34_${slug}`;
     if (appCache.has(cacheKey)) return { streams: appCache.get(cacheKey) };
 
- const sourceEndpoints = [
-      { name: "PhimAPI", url: `https://phimapi.com/phim/${slug}` },      // Nguồn 1 (Nhanh nhất - Ưu tiên hàng đầu)
-      { name: "KKPhim", url: `https://kkphim.vip/phim/${slug}` },        // Nguồn 2
-      { name: "Nguồn C", url: `https://phim.nguonc.com/api/film/${slug}` },// Nguồn 3
-      { name: "Ophim", url: `https://ophim1.com/phim/${slug}` }          // Nguồn 4 (Đã chuyển xuống vị trí cuối cùng)
+// Cấu hình danh sách nguồn kèm Timeout riêng cho từng server
+    const sourceEndpoints = [
+      { name: "PhimAPI", url: `https://phimapi.com/phim/${slug}`, timeout: 2000 },  // Siêu nhanh -> 2s
+      { name: "KKPhim", url: `https://kkphim.vip/phim/${slug}`, timeout: 2500 },    // Nhanh -> 2.5s
+      { name: "Nguồn C", url: `https://phim.nguonc.com/api/film/${slug}`, timeout: 2500 }, // Nhanh -> 2.5s
+      { name: "Ophim", url: `https://ophim1.com/phim/${slug}`, timeout: 4000 }      // Kho cũ, chậm hơn -> Cho hẳn 4s
     ];
 
-    // Bắn request tới tất cả nguồn cùng lúc, không làm crash nếu có nguồn sập
+    // Bắn request đồng thời nhưng áp dụng timeout riêng từng nguồn
     const requests = sourceEndpoints.map(src => 
-      axios.get(src.url, STREAM_AXIOS_CONFIG)
+      axios.get(src.url, { ...AXIOS_CONFIG, timeout: src.timeout })
         .then(res => ({
           source: src.name,
           episodes: res.data?.episodes || res.data?.movie?.episodes || []
