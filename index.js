@@ -254,11 +254,11 @@ builder.defineStreamHandler(async (args) => {
     const cacheKey = `streams_aggregated_v34_${slug}`;
     if (appCache.has(cacheKey)) return { streams: appCache.get(cacheKey) };
 
-    const sourceEndpoints = [
-      { name: "PhimAPI", url: `https://phimapi.com/phim/${slug}` },
-      { name: "Ophim", url: `https://ophim1.com/phim/${slug}` },
-      { name: "KKPhim", url: `https://kkphim.vip/phim/${slug}` },
-      { name: "Nguồn C", url: `https://phim.nguonc.com/api/film/${slug}` }
+ const sourceEndpoints = [
+      { name: "PhimAPI", url: `https://phimapi.com/phim/${slug}` },      // Nguồn 1 (Nhanh nhất - Ưu tiên hàng đầu)
+      { name: "KKPhim", url: `https://kkphim.vip/phim/${slug}` },        // Nguồn 2
+      { name: "Nguồn C", url: `https://phim.nguonc.com/api/film/${slug}` },// Nguồn 3
+      { name: "Ophim", url: `https://ophim1.com/phim/${slug}` }          // Nguồn 4 (Đã chuyển xuống vị trí cuối cùng)
     ];
 
     // Bắn request tới tất cả nguồn cùng lúc, không làm crash nếu có nguồn sập
