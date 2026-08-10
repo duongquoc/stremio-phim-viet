@@ -15,7 +15,7 @@ const AXIOS_CONFIG = {
 
 const STREAM_AXIOS_CONFIG = {
   ...AXIOS_CONFIG,
-  timeout: 6000 
+  timeout: 4800 
 };
 
 const GENRE_SLUGS = {
