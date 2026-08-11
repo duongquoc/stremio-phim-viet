@@ -21,20 +21,20 @@ const GENRE_SLUGS = {
 };
 
 const COUNTRY_SLUGS = {
-  "Việt Nam": "viet-nam", "Âu Mỹ": "au-my", "Hàn Quốc": "han-quoc", 
-  "Trung Quốc": "trung-quoc", "Nhật Bản": "nhat-ban", "Thái Lan": "thai-lan",
-  "Đài Loan": "dai-loan", "Hồng Kông": "hong-kong"
+  "Âu Mỹ": "au-my", "Hàn Quốc": "han-quoc", "Trung Quốc": "trung-quoc", 
+  "Nhật Bản": "nhat-ban", "Thái Lan": "thai-lan", "Đài Loan": "dai-loan", "Hồng Kông": "hong-kong"
 };
 
-// Khai báo menu có chứa Lọc Năm & Điểm Cao
-const MOVIE_GENRES = ["⭐ Top Điểm Cao", "2026", "2025", "2024", "2023", "2022", "2021", "2020", "Hành động", "Kinh dị", "Hài hước", "Viễn tưởng", "Tâm lý", "Cổ trang", "Võ thuật", "Hình sự", "Việt Nam", "Âu Mỹ", "Hàn Quốc"];
-const SERIES_GENRES = ["⭐ Top Điểm Cao", "2026", "2025", "2024", "2023", "2022", "2021", "2020", "Hàn Quốc", "Trung Quốc", "Âu Mỹ", "Việt Nam", "Thái Lan", "Đài Loan", "Tình cảm", "Cổ trang", "Hình sự"];
+// Menu đã gỡ bỏ "Việt Nam" khỏi phần quốc tế vì đã có khu vực riêng
+const MOVIE_GENRES = ["⭐ Top Điểm Cao", "2026", "2025", "2024", "2023", "2022", "2021", "2020", "Hành động", "Kinh dị", "Hài hước", "Viễn tưởng", "Tâm lý", "Cổ trang", "Võ thuật", "Hình sự", "Âu Mỹ", "Hàn Quốc"];
+const SERIES_GENRES = ["⭐ Top Điểm Cao", "2026", "2025", "2024", "2023", "2022", "2021", "2020", "Hàn Quốc", "Trung Quốc", "Âu Mỹ", "Thái Lan", "Đài Loan", "Tình cảm", "Cổ trang", "Hình sự"];
+const VN_GENRES = ["⭐ Top Điểm Cao", "2026", "2025", "2024", "2023", "2022", "2021", "2020"];
 
 const manifest = {
-  id: "org.phimtonghop.v430",
-  version: "4.3.0",
+  id: "org.phimtonghop.v440",
+  version: "4.4.0",
   name: "Kho Phim Tổng Hợp HD",
-  description: "Bản V4.3.0: Lọc theo Năm, tự động xếp hạng Điểm IMDB Cao.",
+  description: "Bản V4.4.0: Tách riêng Phim Lẻ Việt Nam và Phim Bộ Việt Nam.",
   resources: ["catalog", "meta", "stream"],
   types: ["movie", "series"], 
   idPrefixes: ["phimapi:"],
@@ -42,32 +42,32 @@ const manifest = {
     {
       type: "movie",
       id: "phim_le",
-      name: "🎬 Phim Lẻ Mới",
-      extra: [
-        { name: "genre", options: MOVIE_GENRES, isRequired: false },
-        { name: "search", isRequired: false },
-        { name: "skip", isRequired: false }
-      ]
+      name: "🎬 Phim Lẻ Quốc Tế",
+      extra: [{ name: "genre", options: MOVIE_GENRES, isRequired: false }, { name: "search", isRequired: false }, { name: "skip", isRequired: false }]
     },
     {
       type: "series",
       id: "phim_bo",
-      name: "📺 Phim Bộ Đang Hot",
-      extra: [
-        { name: "genre", options: SERIES_GENRES, isRequired: false },
-        { name: "search", isRequired: false },
-        { name: "skip", isRequired: false }
-      ]
+      name: "📺 Phim Bộ Quốc Tế",
+      extra: [{ name: "genre", options: SERIES_GENRES, isRequired: false }, { name: "search", isRequired: false }, { name: "skip", isRequired: false }]
+    },
+    {
+      type: "movie",
+      id: "phim_le_viet",
+      name: "🇻🇳 Phim Lẻ Việt Nam",
+      extra: [{ name: "genre", options: VN_GENRES, isRequired: false }, { name: "search", isRequired: false }, { name: "skip", isRequired: false }]
+    },
+    {
+      type: "series",
+      id: "phim_bo_viet",
+      name: "🇻🇳 Phim Bộ Việt Nam",
+      extra: [{ name: "genre", options: VN_GENRES, isRequired: false }, { name: "search", isRequired: false }, { name: "skip", isRequired: false }]
     },
     {
       type: "movie",
       id: "hoat_hinh",
       name: "🦄 Hoạt Hình & Anime",
-      extra: [
-        { name: "genre", options: ["⭐ Top Điểm Cao", "2026", "2025", "2024", "Nhật Bản", "Trung Quốc", "Âu Mỹ"], isRequired: false },
-        { name: "search", isRequired: false },
-        { name: "skip", isRequired: false }
-      ]
+      extra: [{ name: "genre", options: ["⭐ Top Điểm Cao", "2026", "2025", "2024", "Nhật Bản", "Trung Quốc", "Âu Mỹ"], isRequired: false }, { name: "search", isRequired: false }, { name: "skip", isRequired: false }]
     }
   ]
 };
@@ -80,7 +80,6 @@ function formatImageUrl(path) {
   return `${PHIM_IMG_BASE}${path}`;
 }
 
-// Bắn nhiều request song song hơn khi cần lọc Năm/Điểm để có data đủ dày
 async function fetchItemsFromUrl(baseUrl, numPages = 5) {
   const allItems = [];
   const separator = baseUrl.includes("?") ? "&" : "?";
@@ -123,10 +122,10 @@ function convertItemsToMetas(items) {
 
 // ============ 1. CATALOG HANDLER ============
 builder.defineCatalogHandler(async (args) => {
-  const skip = args.extra?.skip || 0; // Nhận diện thao tác cuộn trang
+  const skip = args.extra?.skip || 0; 
   
   if (args.extra?.search) {
-    const cacheKey = `search_v43_${args.extra.search.toLowerCase().trim()}`;
+    const cacheKey = `search_v44_${args.extra.search.toLowerCase().trim()}`;
     let metas = appCache.get(cacheKey);
     if (!metas) {
       try {
@@ -152,8 +151,11 @@ builder.defineCatalogHandler(async (args) => {
       filterYear = parseInt(selectedGenre);
     }
 
+    // Điều hướng link API chuẩn cho từng Catalog
     if (args.id === "phim_le") targetUrl = "https://phimapi.com/v1/api/danh-sach/phim-le";
     else if (args.id === "phim_bo") targetUrl = "https://phimapi.com/v1/api/danh-sach/phim-bo";
+    else if (args.id === "phim_le_viet") targetUrl = "https://phimapi.com/v1/api/quoc-gia/viet-nam";
+    else if (args.id === "phim_bo_viet") targetUrl = "https://phimapi.com/v1/api/quoc-gia/viet-nam";
     else if (args.id === "hoat_hinh") targetUrl = "https://phimapi.com/v1/api/danh-sach/hoat-hinh";
 
     if (COUNTRY_SLUGS[selectedGenre]) {
@@ -162,20 +164,18 @@ builder.defineCatalogHandler(async (args) => {
       targetUrl = `https://phimapi.com/v1/api/the-loai/${GENRE_SLUGS[selectedGenre]}`;
     }
 
-    // Nếu lọc Năm hoặc Top Điểm, tải tận 10 trang (320 phim) để có dữ liệu dày mà sắp xếp
-    let numPagesFetch = (isTopRating || filterYear) ? 10 : 5;
+    // Nếu vào mục phim Việt hoặc Lọc nâng cao, tự động tải 10 trang (320 phim) để bóc tách cho đủ lượng
+    let numPagesFetch = (isTopRating || filterYear || args.id.includes("viet")) ? 10 : 5;
     let items = await fetchItemsFromUrl(targetUrl, numPagesFetch);
 
-    // Lọc ép kiểu lẻ/bộ
-    if (args.id === "phim_le") items = items.filter(i => i.type === "single" || !i.type);
-    if (args.id === "phim_bo") items = items.filter(i => i.type === "series");
+    // Ép kiểu hiển thị đúng lẻ/bộ cho TẤT CẢ mục (Bao gồm cả mục Phim Việt mới)
+    if (args.id === "phim_le" || args.id === "phim_le_viet") items = items.filter(i => i.type === "single" || !i.type);
+    if (args.id === "phim_bo" || args.id === "phim_bo_viet") items = items.filter(i => i.type === "series");
 
-    // Lọc theo Năm
     if (filterYear) {
       items = items.filter(i => parseInt(i.year) === filterYear);
     }
 
-    // Thuật toán: Sắp xếp theo Điểm từ Cao -> Thấp (Áp dụng khi chọn Top Điểm HOẶC Lọc Năm)
     if (isTopRating || filterYear) {
       items.sort((a, b) => {
         const scoreA = parseFloat(a.tmdb?.vote_average || a.imdb?.rating || 0);
@@ -188,7 +188,6 @@ builder.defineCatalogHandler(async (args) => {
     appCache.set(cacheKey, metas, 21600); 
   }
 
-  // Cắt mảng (slice) để phục vụ tính năng cuộn chuột xuống load tiếp của Stremio
   return { metas: metas.slice(skip, skip + 100) };
 });
 
@@ -196,7 +195,7 @@ builder.defineCatalogHandler(async (args) => {
 builder.defineMetaHandler(async (args) => {
   if (args.id?.startsWith("phimapi:")) {
     const slug = args.id.replace("phimapi:", "").split(":")[0]; 
-    const cacheKey = `meta_detail_v43_${slug}`;
+    const cacheKey = `meta_detail_v44_${slug}`;
     if (appCache.has(cacheKey)) return { meta: appCache.get(cacheKey) };
 
     try {
@@ -237,7 +236,7 @@ builder.defineStreamHandler(async (args) => {
     const seasonNum = idParts[1] ? parseInt(idParts[1]) : 1;
     const episodeNum = idParts[2] ? parseInt(idParts[2]) : null;
 
-    const cacheKey = `streams_agg_v43_${slug}_S${seasonNum}_E${episodeNum || 'full'}`;
+    const cacheKey = `streams_agg_v44_${slug}_S${seasonNum}_E${episodeNum || 'full'}`;
     if (appCache.has(cacheKey)) return { streams: appCache.get(cacheKey) };
 
     const sourceEndpoints = [
@@ -303,5 +302,5 @@ if (RENDER_URL) {
 
 const PORT = process.env.PORT || 7000;
 serveHTTP(builder.getInterface(), { port: PORT }).then(({ url }) => {
-  console.log(`Addon Phim Tối Ưu v4.3.0 đang chạy tại: ${url}manifest.json`);
+  console.log(`Addon Phim Tối Ưu v4.4.0 đang chạy tại: ${url}manifest.json`);
 });
