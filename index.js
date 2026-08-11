@@ -10,26 +10,31 @@ const AXIOS_CONFIG = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
     "Accept": "application/json, text/plain, */*"
   },
-  timeout: 5000 // Tăng tốc độ fail-fast, tránh kẹt chờ Stremio
+  timeout: 5000 
 };
 
-// Map chuẩn danh mục của API
 const GENRE_SLUGS = {
   "Hành động": "hanh-dong", "Hài hước": "hai-huoc", "Tình cảm": "tinh-cam", 
   "Kinh dị": "kinh-di", "Viễn tưởng": "vien-tuong", "Võ thuật": "vo-thuat", 
-  "Tâm lý": "tam-ly", "Cổ trang": "co-trang"
+  "Tâm lý": "tam-ly", "Cổ trang": "co-trang", "Hình sự": "hinh-su",
+  "Thần thoại": "than-thoai", "Gia đình": "gia-dinh", "Chiến tranh": "chien-tranh"
 };
 
 const COUNTRY_SLUGS = {
   "Việt Nam": "viet-nam", "Âu Mỹ": "au-my", "Hàn Quốc": "han-quoc", 
-  "Trung Quốc": "trung-quoc", "Nhật Bản": "nhat-ban", "Thái Lan": "thai-lan"
+  "Trung Quốc": "trung-quoc", "Nhật Bản": "nhat-ban", "Thái Lan": "thai-lan",
+  "Đài Loan": "dai-loan", "Hồng Kông": "hong-kong"
 };
 
+// Khai báo menu có chứa Lọc Năm & Điểm Cao
+const MOVIE_GENRES = ["⭐ Top Điểm Cao", "2026", "2025", "2024", "2023", "2022", "2021", "2020", "Hành động", "Kinh dị", "Hài hước", "Viễn tưởng", "Tâm lý", "Cổ trang", "Võ thuật", "Hình sự", "Việt Nam", "Âu Mỹ", "Hàn Quốc"];
+const SERIES_GENRES = ["⭐ Top Điểm Cao", "2026", "2025", "2024", "2023", "2022", "2021", "2020", "Hàn Quốc", "Trung Quốc", "Âu Mỹ", "Việt Nam", "Thái Lan", "Đài Loan", "Tình cảm", "Cổ trang", "Hình sự"];
+
 const manifest = {
-  id: "org.phimtonghop.v410",
-  version: "4.1.0",
+  id: "org.phimtonghop.v430",
+  version: "4.3.0",
   name: "Kho Phim Tổng Hợp HD",
-  description: "Bản V4.1.0: Tải danh mục siêu tốc (Parallel Limit), không còn lag ảnh.",
+  description: "Bản V4.3.0: Lọc theo Năm, tự động xếp hạng Điểm IMDB Cao.",
   resources: ["catalog", "meta", "stream"],
   types: ["movie", "series"], 
   idPrefixes: ["phimapi:"],
@@ -39,8 +44,9 @@ const manifest = {
       id: "phim_le",
       name: "🎬 Phim Lẻ Mới",
       extra: [
-        { name: "genre", options: ["Hành động", "Kinh dị", "Hài hước", "Viễn tưởng", "Tâm lý", "Cổ trang", "Việt Nam", "Âu Mỹ", "Hàn Quốc"], isRequired: false },
-        { name: "search", isRequired: false }
+        { name: "genre", options: MOVIE_GENRES, isRequired: false },
+        { name: "search", isRequired: false },
+        { name: "skip", isRequired: false }
       ]
     },
     {
@@ -48,15 +54,20 @@ const manifest = {
       id: "phim_bo",
       name: "📺 Phim Bộ Đang Hot",
       extra: [
-        { name: "genre", options: ["Hàn Quốc", "Trung Quốc", "Âu Mỹ", "Việt Nam", "Thái Lan", "Tình cảm", "Cổ trang"], isRequired: false },
-        { name: "search", isRequired: false }
+        { name: "genre", options: SERIES_GENRES, isRequired: false },
+        { name: "search", isRequired: false },
+        { name: "skip", isRequired: false }
       ]
     },
     {
       type: "movie",
       id: "hoat_hinh",
       name: "🦄 Hoạt Hình & Anime",
-      extra: [{ name: "search", isRequired: false }]
+      extra: [
+        { name: "genre", options: ["⭐ Top Điểm Cao", "2026", "2025", "2024", "Nhật Bản", "Trung Quốc", "Âu Mỹ"], isRequired: false },
+        { name: "search", isRequired: false },
+        { name: "skip", isRequired: false }
+      ]
     }
   ]
 };
@@ -69,7 +80,7 @@ function formatImageUrl(path) {
   return `${PHIM_IMG_BASE}${path}`;
 }
 
-// 🚀 THUẬT TOÁN TẢI NHANH (MỚI): Bắn 5 requests song song, ép Limit 32/trang
+// Bắn nhiều request song song hơn khi cần lọc Năm/Điểm để có data đủ dày
 async function fetchItemsFromUrl(baseUrl, numPages = 5) {
   const allItems = [];
   const separator = baseUrl.includes("?") ? "&" : "?";
@@ -103,7 +114,7 @@ function convertItemsToMetas(items) {
       name: rating !== "N/A" ? `${baseName} [⭐ ${rating}]` : baseName,
       poster: formatImageUrl(item.poster_url || item.thumb_url),
       background: formatImageUrl(item.thumb_url || item.poster_url),
-      description: `Tên gốc: ${item.origin_name || item.name}\nNăm phát hành: ${item.year || "N/A"}`,
+      description: `⭐ Điểm: ${rating}/10\nTên gốc: ${item.origin_name || item.name}\nNăm: ${item.year || "N/A"}`,
       releaseInfo: item.year ? String(item.year) : "",
       imdbRating: rating !== "N/A" ? String(rating) : undefined
     };
@@ -112,55 +123,80 @@ function convertItemsToMetas(items) {
 
 // ============ 1. CATALOG HANDLER ============
 builder.defineCatalogHandler(async (args) => {
+  const skip = args.extra?.skip || 0; // Nhận diện thao tác cuộn trang
+  
   if (args.extra?.search) {
-    const cacheKey = `search_v41_${args.extra.search.toLowerCase().trim()}`;
-    if (appCache.has(cacheKey)) return { metas: appCache.get(cacheKey) };
-
-    try {
-      const res = await axios.get(`https://phimapi.com/v1/api/tim-kiem?keyword=${encodeURIComponent(args.extra.search)}&limit=40`, AXIOS_CONFIG);
-      const items = res.data?.data?.items || [];
-      const metas = convertItemsToMetas(items);
-      appCache.set(cacheKey, metas, 3600);
-      return { metas: metas };
-    } catch (error) { return { metas: [] }; }
+    const cacheKey = `search_v43_${args.extra.search.toLowerCase().trim()}`;
+    let metas = appCache.get(cacheKey);
+    if (!metas) {
+      try {
+        const res = await axios.get(`https://phimapi.com/v1/api/tim-kiem?keyword=${encodeURIComponent(args.extra.search)}&limit=40`, AXIOS_CONFIG);
+        metas = convertItemsToMetas(res.data?.data?.items || []);
+        appCache.set(cacheKey, metas, 3600);
+      } catch (error) { metas = []; }
+    }
+    return { metas: metas.slice(skip, skip + 100) };
   }
 
   const selectedGenre = args.extra?.genre || null;
   const cacheKey = `cat_${args.id}_${selectedGenre || "all"}`;
-  if (appCache.has(cacheKey)) return { metas: appCache.get(cacheKey) };
-
-  let targetUrl = "";
   
-  if (args.id === "phim_le") targetUrl = "https://phimapi.com/v1/api/danh-sach/phim-le";
-  else if (args.id === "phim_bo") targetUrl = "https://phimapi.com/v1/api/danh-sach/phim-bo";
-  else if (args.id === "hoat_hinh") targetUrl = "https://phimapi.com/v1/api/danh-sach/hoat-hinh";
+  let metas = appCache.get(cacheKey);
 
-  if (selectedGenre) {
+  if (!metas) {
+    let targetUrl = "";
+    let isTopRating = selectedGenre === "⭐ Top Điểm Cao";
+    let filterYear = null;
+
+    if (selectedGenre && !isNaN(selectedGenre) && selectedGenre.length === 4) {
+      filterYear = parseInt(selectedGenre);
+    }
+
+    if (args.id === "phim_le") targetUrl = "https://phimapi.com/v1/api/danh-sach/phim-le";
+    else if (args.id === "phim_bo") targetUrl = "https://phimapi.com/v1/api/danh-sach/phim-bo";
+    else if (args.id === "hoat_hinh") targetUrl = "https://phimapi.com/v1/api/danh-sach/hoat-hinh";
+
     if (COUNTRY_SLUGS[selectedGenre]) {
       targetUrl = `https://phimapi.com/v1/api/quoc-gia/${COUNTRY_SLUGS[selectedGenre]}`;
     } else if (GENRE_SLUGS[selectedGenre]) {
       targetUrl = `https://phimapi.com/v1/api/the-loai/${GENRE_SLUGS[selectedGenre]}`;
     }
-  }
 
-  // Tải 5 trang song song siêu tốc
-  let items = await fetchItemsFromUrl(targetUrl, 5);
+    // Nếu lọc Năm hoặc Top Điểm, tải tận 10 trang (320 phim) để có dữ liệu dày mà sắp xếp
+    let numPagesFetch = (isTopRating || filterYear) ? 10 : 5;
+    let items = await fetchItemsFromUrl(targetUrl, numPagesFetch);
 
-  if (selectedGenre) {
+    // Lọc ép kiểu lẻ/bộ
     if (args.id === "phim_le") items = items.filter(i => i.type === "single" || !i.type);
     if (args.id === "phim_bo") items = items.filter(i => i.type === "series");
+
+    // Lọc theo Năm
+    if (filterYear) {
+      items = items.filter(i => parseInt(i.year) === filterYear);
+    }
+
+    // Thuật toán: Sắp xếp theo Điểm từ Cao -> Thấp (Áp dụng khi chọn Top Điểm HOẶC Lọc Năm)
+    if (isTopRating || filterYear) {
+      items.sort((a, b) => {
+        const scoreA = parseFloat(a.tmdb?.vote_average || a.imdb?.rating || 0);
+        const scoreB = parseFloat(b.tmdb?.vote_average || b.imdb?.rating || 0);
+        return scoreB - scoreA; 
+      });
+    }
+
+    metas = convertItemsToMetas(items);
+    appCache.set(cacheKey, metas, 21600); 
   }
 
-  const metas = convertItemsToMetas(items);
-  appCache.set(cacheKey, metas, 14400); 
-  return { metas: metas };
+  // Cắt mảng (slice) để phục vụ tính năng cuộn chuột xuống load tiếp của Stremio
+  return { metas: metas.slice(skip, skip + 100) };
 });
 
 // ============ 2. META HANDLER ============
 builder.defineMetaHandler(async (args) => {
   if (args.id?.startsWith("phimapi:")) {
     const slug = args.id.replace("phimapi:", "").split(":")[0]; 
-    const cacheKey = `meta_detail_v41_${slug}`;
+    const cacheKey = `meta_detail_v43_${slug}`;
     if (appCache.has(cacheKey)) return { meta: appCache.get(cacheKey) };
 
     try {
@@ -201,7 +237,7 @@ builder.defineStreamHandler(async (args) => {
     const seasonNum = idParts[1] ? parseInt(idParts[1]) : 1;
     const episodeNum = idParts[2] ? parseInt(idParts[2]) : null;
 
-    const cacheKey = `streams_agg_v41_${slug}_S${seasonNum}_E${episodeNum || 'full'}`;
+    const cacheKey = `streams_agg_v43_${slug}_S${seasonNum}_E${episodeNum || 'full'}`;
     if (appCache.has(cacheKey)) return { streams: appCache.get(cacheKey) };
 
     const sourceEndpoints = [
@@ -267,5 +303,5 @@ if (RENDER_URL) {
 
 const PORT = process.env.PORT || 7000;
 serveHTTP(builder.getInterface(), { port: PORT }).then(({ url }) => {
-  console.log(`Addon Phim Tối Ưu v4.1.0 đang chạy tại: ${url}manifest.json`);
+  console.log(`Addon Phim Tối Ưu v4.3.0 đang chạy tại: ${url}manifest.json`);
 });
