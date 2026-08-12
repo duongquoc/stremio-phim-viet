@@ -234,10 +234,10 @@ builder.defineStreamHandler(async (args) => {
 
     // ✨ Tối ưu: Đưa HLS Proxy và Nguồn C lên đầu, Timeout chờ đủ lâu để lấy link mượt
     const sourceEndpoints = [
-      { name: "Nguồn C (HLS Proxy)", url: `https://media.hth4nh.eu.org/nguonc/${slug}`, timeout: 3500 },
       { name: "Nguồn C", url: `https://phim.nguonc.com/api/film/${slug}`, timeout: 3000 },
       { name: "VSMOV", url: `https://vsmov.com/api/film/${slug}`, timeout: 3000 },
       { name: "KKPhim", url: `https://kkphim.vip/phim/${slug}`, timeout: 2500 },
+      { name: "PhimAPI", url: `https://phimapi.com/phim/${slug}`, timeout: 2500 },
       { name: "Ophim", url: `https://ophim1.com/phim/${slug}`, timeout: 3000 }
     ];
 
