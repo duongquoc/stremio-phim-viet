@@ -32,9 +32,9 @@ const VN_GENRES = ["⭐ Top Điểm Cao", "2026", "2025", "2024", "2023", "2022"
 
 const manifest = {
   id: "org.phimtonghop.v440",
-  version: "4.4.0",
+  version: "4.4.8",
   name: "Kho Phim Tổng Hợp HD",
-  description: "Bản V4.4.0: Tách riêng Phim Lẻ Việt Nam và Phim Bộ Việt Nam.",
+  description: "Bản V4.4.8: Tách riêng Phim Lẻ Việt Nam và Phim Bộ Việt Nam.",
   resources: ["catalog", "meta", "stream"],
   types: ["movie", "series"], 
   idPrefixes: ["phimapi:"],
@@ -299,5 +299,5 @@ if (RENDER_URL) {
 
 const PORT = process.env.PORT || 7000;
 serveHTTP(builder.getInterface(), { port: PORT }).then(({ url }) => {
-  console.log(`Addon Phim Tối Ưu v4.4.0 đang chạy tại: ${url}manifest.json`);
+  console.log(`Addon Phim Tối Ưu v4.4.8 đang chạy tại: ${url}manifest.json`);
 });
