@@ -27,10 +27,10 @@ const COUNTRY_SLUGS = {
 };
 
 const manifest = {
-  id: "org.phimtonghop.v462",
-  version: "4.6.2",
+  id: "org.phimtonghop.v463",
+  version: "4.6.3",
   name: "Kho Phim Tổng Hợp HD",
-  description: "Bản V4.6.2: Fix lỗi treo Stremio, Tối ưu VSMOV, Nguồn C, PhimAPI. Lọc link m3u8 siêu mượt.",
+  description: "Bản V4.6.3: Tự động phân biệt và hiển thị chuẩn xác luồng Thuyết Minh / Vietsub.",
   resources: ["catalog", "meta", "stream"],
   types: ["movie", "series"], 
   idPrefixes: ["phimapi:"],
@@ -129,7 +129,7 @@ builder.defineCatalogHandler(async (args) => {
   
   // TÌM KIẾM
   if (args.extra?.search) {
-    const cacheKey = `search_v462_${args.extra.search.toLowerCase().trim()}`;
+    const cacheKey = `search_v463_${args.extra.search.toLowerCase().trim()}`;
     let metas = appCache.get(cacheKey);
     if (!metas) {
       try {
@@ -188,7 +188,7 @@ builder.defineCatalogHandler(async (args) => {
 builder.defineMetaHandler(async (args) => {
   if (args.id?.startsWith("phimapi:")) {
     const slug = args.id.replace("phimapi:", "").split(":")[0]; 
-    const cacheKey = `meta_detail_v462_${slug}`;
+    const cacheKey = `meta_detail_v463_${slug}`;
     if (appCache.has(cacheKey)) return { meta: appCache.get(cacheKey) };
 
     try {
@@ -229,10 +229,10 @@ builder.defineStreamHandler(async (args) => {
     const seasonNum = idParts[1] ? parseInt(idParts[1]) : 1;
     const episodeNum = idParts[2] ? parseInt(idParts[2]) : null;
 
-    const cacheKey = `streams_agg_v462_${slug}_S${seasonNum}_E${episodeNum || 'full'}`;
+    const cacheKey = `streams_agg_v463_${slug}_S${seasonNum}_E${episodeNum || 'full'}`;
     if (appCache.has(cacheKey)) return { streams: appCache.get(cacheKey) };
 
-    // 5 Trạm API Chuẩn (Loại bỏ các đường link ảo gây lag)
+    // 5 Trạm API Chuẩn
     const sourceEndpoints = [
       { name: "NguonC", url: `https://phim.nguonc.com/api/film/${slug}`, timeout: 3000 },
       { name: "VSMOV", url: `https://vsmov.com/api/film/${slug}`, timeout: 3000 },
@@ -258,21 +258,22 @@ builder.defineStreamHandler(async (args) => {
       if (item.episodes && item.episodes.length > 0) {
         item.episodes.forEach(server => {
           const epList = server.server_data || server.items || [];
+          
+          // Đọc động tên Server (ví dụ: "Thuyết Minh #1", "Vietsub #1") từ API, nếu không có tự động gán "Vietsub"
+          const serverLabel = server.server_name || "Vietsub";
 
           epList.forEach((ep, index) => {
             const currentEpNum = index + 1;
             if (episodeNum && currentEpNum !== episodeNum) return;
 
-            // Đọc link chuẩn, bỏ qua link web embed gây treo
             const m3u8Url = ep.link_m3u8 || ep.m3u8;
 
-            // Bộ lọc lõi: Chỉ nhận đuôi file video m3u8/mp4
             if (m3u8Url && (m3u8Url.includes('.m3u8') || m3u8Url.includes('.mp4')) && !seenUrls.has(m3u8Url)) {
               seenUrls.add(m3u8Url);
               
               streams.push({
                 name: `[${item.source}]`,
-                title: `Vietsub #1 - ${ep.name || "Tập " + currentEpNum}\n▶ Xem Mượt`,
+                title: `${serverLabel} - ${ep.name || "Tập " + currentEpNum}\n▶ Xem Mượt`,
                 url: m3u8Url
               });
             }
@@ -299,5 +300,5 @@ if (RENDER_URL) {
 
 const PORT = process.env.PORT || 7000;
 serveHTTP(builder.getInterface(), { port: PORT }).then(({ url }) => {
-  console.log(`Addon Phim v4.6.2 Final đang chạy tại: ${url}manifest.json`);
+  console.log(`Addon Phim v4.6.3 đang chạy tại: ${url}manifest.json`);
 });
