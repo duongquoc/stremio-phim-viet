@@ -27,30 +27,48 @@ const COUNTRY_SLUGS = {
 };
 
 const manifest = {
-  id: "org.phimtonghop.v463",
-  version: "4.6.3",
+  id: "org.phimtonghop.v464",
+  version: "4.6.4",
   name: "Kho Phim Tổng Hợp HD",
-  description: "Bản V4.6.3: Tự động phân biệt và hiển thị chuẩn xác luồng Thuyết Minh / Vietsub.",
+  description: "Bản V4.6.4: Thêm mục Phim Mới & Top Điểm Quốc Tế/VN. Nhận diện chuẩn Thuyết Minh/Vietsub.",
   resources: ["catalog", "meta", "stream"],
   types: ["movie", "series"], 
   idPrefixes: ["phimapi:"],
   catalogs: [
     {
       type: "movie",
+      id: "phim_moi_viet",
+      name: "🇻🇳 Phim Mới (Việt Nam)",
+      extra: [{ name: "search", isRequired: false }, { name: "skip", isRequired: false }]
+    },
+    {
+      type: "movie",
       id: "phim_viet_top",
-      name: "🇻🇳 Phim Việt Nam (⭐ Top Điểm Cao)",
+      name: "🇻🇳 Top Điểm (Việt Nam)",
       extra: [{ name: "search", isRequired: false }, { name: "skip", isRequired: false }]
     },
     {
       type: "movie",
       id: "phim_le_viet",
-      name: "🇻🇳 Phim Lẻ Việt Nam Mới",
+      name: "🇻🇳 Phim Lẻ (Việt Nam)",
       extra: [{ name: "search", isRequired: false }, { name: "skip", isRequired: false }]
     },
     {
       type: "series",
       id: "phim_bo_viet",
-      name: "🇻🇳 Phim Bộ Việt Nam Mới",
+      name: "🇻🇳 Phim Bộ (Việt Nam)",
+      extra: [{ name: "search", isRequired: false }, { name: "skip", isRequired: false }]
+    },
+    {
+      type: "movie",
+      id: "phim_moi_quoc_te",
+      name: "🌍 Phim Mới (Quốc Tế)",
+      extra: [{ name: "search", isRequired: false }, { name: "skip", isRequired: false }]
+    },
+    {
+      type: "movie",
+      id: "phim_top_quoc_te",
+      name: "🌍 Top Điểm (Quốc Tế)",
       extra: [{ name: "search", isRequired: false }, { name: "skip", isRequired: false }]
     },
     {
@@ -82,7 +100,7 @@ function formatImageUrl(path) {
   return `${PHIM_IMG_BASE}${path}`;
 }
 
-// Bắn Multi-requests để lấy nhanh 5-10 trang
+// Bắn Multi-requests để lấy nhanh dữ liệu
 async function fetchItemsFromUrl(baseUrl, numPages = 5) {
   const allItems = [];
   const separator = baseUrl.includes("?") ? "&" : "?";
@@ -129,7 +147,7 @@ builder.defineCatalogHandler(async (args) => {
   
   // TÌM KIẾM
   if (args.extra?.search) {
-    const cacheKey = `search_v463_${args.extra.search.toLowerCase().trim()}`;
+    const cacheKey = `search_v464_${args.extra.search.toLowerCase().trim()}`;
     let metas = appCache.get(cacheKey);
     if (!metas) {
       try {
@@ -147,29 +165,55 @@ builder.defineCatalogHandler(async (args) => {
   let metas = appCache.get(cacheKey);
 
   if (!metas) {
-    let targetUrl = "";
-    let isTopRating = args.id === "phim_viet_top";
+    let isTopRating = args.id === "phim_viet_top" || args.id === "phim_top_quoc_te";
+    let items = [];
 
-    if (args.id === "phim_le") targetUrl = "https://phimapi.com/v1/api/danh-sach/phim-le";
-    else if (args.id === "phim_bo") targetUrl = "https://phimapi.com/v1/api/danh-sach/phim-bo";
-    else if (args.id === "hoat_hinh") targetUrl = "https://phimapi.com/v1/api/danh-sach/hoat-hinh";
-    else if (args.id.includes("viet")) targetUrl = "https://phimapi.com/v1/api/quoc-gia/viet-nam";
-
-    if (selectedGenre) {
-      if (COUNTRY_SLUGS[selectedGenre]) {
-        targetUrl = `https://phimapi.com/v1/api/quoc-gia/${COUNTRY_SLUGS[selectedGenre]}`;
-      } else if (GENRE_SLUGS[selectedGenre]) {
-        targetUrl = `https://phimapi.com/v1/api/the-loai/${GENRE_SLUGS[selectedGenre]}`;
+    // Xử lý riêng cho mục Phim Quốc Tế (Trộn cả Phim Lẻ + Phim Bộ)
+    if (args.id === "phim_top_quoc_te" || args.id === "phim_moi_quoc_te") {
+      // Top điểm quét 15 trang để lọc, Mới cập nhật quét 6 trang
+      const pages = args.id === "phim_top_quoc_te" ? 15 : 6;
+      const le = await fetchItemsFromUrl("https://phimapi.com/v1/api/danh-sach/phim-le", pages);
+      const bo = await fetchItemsFromUrl("https://phimapi.com/v1/api/danh-sach/phim-bo", pages);
+      
+      if (args.id === "phim_moi_quoc_te") {
+        // Trộn đều (1 phim lẻ, 1 phim bộ) để màn hình hiển thị đa dạng
+        const maxLen = Math.max(le.length, bo.length);
+        for (let i = 0; i < maxLen; i++) {
+          if (le[i]) items.push(le[i]);
+          if (bo[i]) items.push(bo[i]);
+        }
+      } else {
+        items = [...le, ...bo];
       }
+    } 
+    // Xử lý các danh mục bình thường
+    else {
+      let targetUrl = "";
+      if (args.id === "phim_le") targetUrl = "https://phimapi.com/v1/api/danh-sach/phim-le";
+      else if (args.id === "phim_bo") targetUrl = "https://phimapi.com/v1/api/danh-sach/phim-bo";
+      else if (args.id === "hoat_hinh") targetUrl = "https://phimapi.com/v1/api/danh-sach/hoat-hinh";
+      else if (args.id.includes("viet")) targetUrl = "https://phimapi.com/v1/api/quoc-gia/viet-nam"; // Bao quát cho cả VN mới, top, lẻ, bộ
+
+      if (selectedGenre) {
+        if (COUNTRY_SLUGS[selectedGenre]) {
+          targetUrl = `https://phimapi.com/v1/api/quoc-gia/${COUNTRY_SLUGS[selectedGenre]}`;
+        } else if (GENRE_SLUGS[selectedGenre]) {
+          targetUrl = `https://phimapi.com/v1/api/the-loai/${GENRE_SLUGS[selectedGenre]}`;
+        }
+      }
+
+      let numPagesFetch = (isTopRating || args.id.includes("viet")) ? 10 : 5;
+      items = await fetchItemsFromUrl(targetUrl, numPagesFetch);
     }
 
-    let numPagesFetch = (isTopRating || args.id.includes("viet")) ? 10 : 5;
-    let items = await fetchItemsFromUrl(targetUrl, numPagesFetch);
-
+    // Lọc lại type cho mục Lẻ / Bộ riêng biệt (Mục Mới/Top thì giữ cả 2)
     if (args.id === "phim_le" || args.id === "phim_le_viet") items = items.filter(i => i.type === "single" || !i.type);
     if (args.id === "phim_bo" || args.id === "phim_bo_viet") items = items.filter(i => i.type === "series");
 
+    // Sắp xếp điểm số cho các mục TOP
     if (isTopRating) {
+      // Chỉ lấy phim có điểm (lớn hơn 0) để rác không lọt vào Top
+      items = items.filter(a => parseFloat(a.tmdb?.vote_average || a.imdb?.rating || 0) > 0);
       items.sort((a, b) => {
         const scoreA = parseFloat(a.tmdb?.vote_average || a.imdb?.rating || 0);
         const scoreB = parseFloat(b.tmdb?.vote_average || b.imdb?.rating || 0);
@@ -188,7 +232,7 @@ builder.defineCatalogHandler(async (args) => {
 builder.defineMetaHandler(async (args) => {
   if (args.id?.startsWith("phimapi:")) {
     const slug = args.id.replace("phimapi:", "").split(":")[0]; 
-    const cacheKey = `meta_detail_v463_${slug}`;
+    const cacheKey = `meta_detail_v464_${slug}`;
     if (appCache.has(cacheKey)) return { meta: appCache.get(cacheKey) };
 
     try {
@@ -221,7 +265,7 @@ builder.defineMetaHandler(async (args) => {
   return { meta: {} };
 });
 
-// ============ 3. STREAM HANDLER ============
+// ============ 3. STREAM HANDLER (Giữ nguyên Fix Thuyết Minh) ============
 builder.defineStreamHandler(async (args) => {
   if (args.id?.startsWith("phimapi:")) {
     const idParts = args.id.replace("phimapi:", "").split(":");
@@ -229,7 +273,7 @@ builder.defineStreamHandler(async (args) => {
     const seasonNum = idParts[1] ? parseInt(idParts[1]) : 1;
     const episodeNum = idParts[2] ? parseInt(idParts[2]) : null;
 
-    const cacheKey = `streams_agg_v463_${slug}_S${seasonNum}_E${episodeNum || 'full'}`;
+    const cacheKey = `streams_agg_v464_${slug}_S${seasonNum}_E${episodeNum || 'full'}`;
     if (appCache.has(cacheKey)) return { streams: appCache.get(cacheKey) };
 
     // 5 Trạm API Chuẩn
@@ -259,7 +303,7 @@ builder.defineStreamHandler(async (args) => {
         item.episodes.forEach(server => {
           const epList = server.server_data || server.items || [];
           
-          // Đọc động tên Server (ví dụ: "Thuyết Minh #1", "Vietsub #1") từ API, nếu không có tự động gán "Vietsub"
+          // Lấy đúng tên Server gốc (Ví dụ: "Thuyết Minh #1", "Vietsub #1")
           const serverLabel = server.server_name || "Vietsub";
 
           epList.forEach((ep, index) => {
@@ -268,6 +312,7 @@ builder.defineStreamHandler(async (args) => {
 
             const m3u8Url = ep.link_m3u8 || ep.m3u8;
 
+            // Bộ lọc an toàn: Chỉ cho phép link video đi qua
             if (m3u8Url && (m3u8Url.includes('.m3u8') || m3u8Url.includes('.mp4')) && !seenUrls.has(m3u8Url)) {
               seenUrls.add(m3u8Url);
               
@@ -300,5 +345,5 @@ if (RENDER_URL) {
 
 const PORT = process.env.PORT || 7000;
 serveHTTP(builder.getInterface(), { port: PORT }).then(({ url }) => {
-  console.log(`Addon Phim v4.6.3 đang chạy tại: ${url}manifest.json`);
+  console.log(`Addon Phim v4.6.4 đang chạy tại: ${url}manifest.json`);
 });
