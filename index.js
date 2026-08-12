@@ -236,7 +236,6 @@ builder.defineStreamHandler(async (args) => {
     const sourceEndpoints = [
       { name: "Nguồn C (HLS Proxy)", url: `https://media.hth4nh.eu.org/nguonc/${slug}`, timeout: 3500 },
       { name: "Nguồn C", url: `https://phim.nguonc.com/api/film/${slug}`, timeout: 3000 },
-      { name: "PhimAPI", url: `https://phimapi.com/phim/${slug}`, timeout: 2500 },
       { name: "KKPhim", url: `https://kkphim.vip/phim/${slug}`, timeout: 2500 },
       { name: "Ophim", url: `https://ophim1.com/phim/${slug}`, timeout: 3000 }
     ];
