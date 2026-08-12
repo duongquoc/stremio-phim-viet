@@ -27,10 +27,10 @@ const COUNTRY_SLUGS = {
 };
 
 const manifest = {
-  id: "org.phimtonghop.v460",
-  version: "4.6.0",
+  id: "org.phimtonghop.v461",
+  version: "4.6.1",
   name: "Kho Phim Tổng Hợp HD",
-  description: "Bản V4.6.0 Final: Tối ưu Nguồn C HLS Proxy, tách danh mục chuẩn, fix lỗi API.",
+  description: "Bản V4.6.1 Final: Nguồn C siêu tốc, VSMOV, Fix Embed & HLS Proxy UI.",
   resources: ["catalog", "meta", "stream"],
   types: ["movie", "series"], 
   idPrefixes: ["phimapi:"],
@@ -129,7 +129,7 @@ builder.defineCatalogHandler(async (args) => {
   
   // TÌM KIẾM
   if (args.extra?.search) {
-    const cacheKey = `search_v46_${args.extra.search.toLowerCase().trim()}`;
+    const cacheKey = `search_v461_${args.extra.search.toLowerCase().trim()}`;
     let metas = appCache.get(cacheKey);
     if (!metas) {
       try {
@@ -188,7 +188,7 @@ builder.defineCatalogHandler(async (args) => {
 builder.defineMetaHandler(async (args) => {
   if (args.id?.startsWith("phimapi:")) {
     const slug = args.id.replace("phimapi:", "").split(":")[0]; 
-    const cacheKey = `meta_detail_v46_${slug}`;
+    const cacheKey = `meta_detail_v461_${slug}`;
     if (appCache.has(cacheKey)) return { meta: appCache.get(cacheKey) };
 
     try {
@@ -229,15 +229,15 @@ builder.defineStreamHandler(async (args) => {
     const seasonNum = idParts[1] ? parseInt(idParts[1]) : 1;
     const episodeNum = idParts[2] ? parseInt(idParts[2]) : null;
 
-    const cacheKey = `streams_agg_v46_${slug}_S${seasonNum}_E${episodeNum || 'full'}`;
+    const cacheKey = `streams_agg_v461_${slug}_S${seasonNum}_E${episodeNum || 'full'}`;
     if (appCache.has(cacheKey)) return { streams: appCache.get(cacheKey) };
 
-    // ✨ Tối ưu: Đưa HLS Proxy và Nguồn C lên đầu, Timeout chờ đủ lâu để lấy link mượt
+    // Bắn request siêu tốc đa luồng (Đã xóa Proxy ảo gây chậm)
     const sourceEndpoints = [
-      { name: "Nguồn C (HLS Proxy)", url: `https://media.hth4nh.eu.org/nguonc/${slug}`, timeout: 3500 },
-      { name: "Nguồn C", url: `https://phim.nguonc.com/api/film/${slug}`, timeout: 5000 },
-      { name: "KKPhim", url: `https://kkphim.vip/phim/${slug}`, timeout: 2500 },
+      { name: "NguonC", url: `https://phim.nguonc.com/api/film/${slug}`, timeout: 3000 },
+      { name: "VSMOV", url: `https://vsmov.com/api/film/${slug}`, timeout: 3000 },
       { name: "PhimAPI", url: `https://phimapi.com/phim/${slug}`, timeout: 2500 },
+      { name: "KKPhim", url: `https://kkphim.vip/phim/${slug}`, timeout: 2500 },
       { name: "Ophim", url: `https://ophim1.com/phim/${slug}`, timeout: 3000 }
     ];
 
@@ -257,23 +257,26 @@ builder.defineStreamHandler(async (args) => {
     results.forEach(item => {
       if (item.episodes && item.episodes.length > 0) {
         item.episodes.forEach(server => {
-          const serverName = server.server_name || "Server HD";
-          
-          // ✨ Tối ưu: Hỗ trợ đọc cả server_data (PhimAPI) và items (Nguồn C)
+          // Hỗ trợ đọc đa luồng (PhimAPI, Nguồn C, VSMOV)
           const epList = server.server_data || server.items || [];
 
           epList.forEach((ep, index) => {
             const currentEpNum = index + 1;
             if (episodeNum && currentEpNum !== episodeNum) return;
 
-            // ✨ Tối ưu: Hỗ trợ đọc cả link_m3u8 và m3u8
+            // Đọc trọn gói mọi định dạng link
             const m3u8Url = ep.link_m3u8 || ep.m3u8 || ep.embed;
 
             if (m3u8Url && !seenUrls.has(m3u8Url)) {
               seenUrls.add(m3u8Url);
+              
+              // Tạo nhãn hiển thị xịn sò như chuẩn UI bên ngoài
+              let displayLabel = "▶ Xem Mượt";
+              if (item.source === "NguonC") displayLabel = "🌐 HLS Proxy";
+
               streams.push({
-                name: `[${item.source}]`,
-                title: `${serverName} - ${ep.name || "Tập " + currentEpNum}\n▶ Xem Mượt`,
+                name: item.source,
+                title: `Vietsub #1 - ${ep.name || "Tập " + currentEpNum}\n${displayLabel}`,
                 url: m3u8Url
               });
             }
@@ -300,5 +303,5 @@ if (RENDER_URL) {
 
 const PORT = process.env.PORT || 7000;
 serveHTTP(builder.getInterface(), { port: PORT }).then(({ url }) => {
-  console.log(`Addon Phim v4.6.0 Final đang chạy tại: ${url}manifest.json`);
+  console.log(`Addon Phim v4.6.1 Final đang chạy tại: ${url}manifest.json`);
 });
