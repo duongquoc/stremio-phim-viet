@@ -267,7 +267,7 @@ builder.defineStreamHandler(async (args) => {
             if (episodeNum && currentEpNum !== episodeNum) return;
 
             // ✨ Tối ưu: Hỗ trợ đọc cả link_m3u8 và m3u8
-            const m3u8Url = ep.link_m3u8 || ep.m3u8;
+            const m3u8Url = ep.link_m3u8 || ep.m3u8 || ep.embed;
 
             if (m3u8Url && !seenUrls.has(m3u8Url)) {
               seenUrls.add(m3u8Url);
