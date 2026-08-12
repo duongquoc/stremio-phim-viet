@@ -244,9 +244,6 @@ builder.defineStreamHandler(async (args) => {
       { name: "KKPhim", url: `https://kkphim.vip/phim/${slug}`, timeout: 2500 },
       { name: "Nguồn C", url: `https://phim.nguonc.com/api/film/${slug}`, timeout: 2500 },
       { name: "Ophim", url: `https://ophim1.com/phim/${slug}`, timeout: 3000 },
-      { name: "Backup KK", url: `https://media.hth4nh.eu.org/kkphim/${slug}`, timeout: 3500 },
-      { name: "Backup NguồnC", url: `https://media.hth4nh.eu.org/nguonc/${slug}`, timeout: 3500 },
-      { name: "Backup Ophim", url: `https://media.hth4nh.eu.org/ophim/${slug}`, timeout: 3500 }
     ];
 
     const requests = sourceEndpoints.map(src => 
