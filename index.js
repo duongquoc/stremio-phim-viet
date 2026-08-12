@@ -240,9 +240,9 @@ builder.defineStreamHandler(async (args) => {
     if (appCache.has(cacheKey)) return { streams: appCache.get(cacheKey) };
 
     const sourceEndpoints = [
-      { name: "PhimAPI", url: `https://phimapi.com/phim/${slug}`, timeout: 2500 },
-      { name: "KKPhim", url: `https://kkphim.vip/phim/${slug}`, timeout: 2500 },
       { name: "Nguồn C", url: `https://phim.nguonc.com/api/film/${slug}`, timeout: 2500 },
+      { name: "KKPhim", url: `https://kkphim.vip/phim/${slug}`, timeout: 2500 },
+      { name: "PhimAPI", url: `https://phimapi.com/phim/${slug}`, timeout: 2500 },
       { name: "Ophim", url: `https://ophim1.com/phim/${slug}`, timeout: 3000 },
     ];
 
