@@ -10,10 +10,9 @@ const AXIOS_CONFIG = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
     "Accept": "application/json, text/plain, */*"
   },
-  timeout: 4000 
+  timeout: 5000 
 };
 
-// Map danh mục
 const GENRE_SLUGS = {
   "Hành động": "hanh-dong", "Hài hước": "hai-huoc", "Tình cảm": "tinh-cam", 
   "Kinh dị": "kinh-di", "Viễn tưởng": "vien-tuong", "Võ thuật": "vo-thuat", 
@@ -26,10 +25,10 @@ const COUNTRY_SLUGS = {
 };
 
 const manifest = {
-  id: "org.phimtonghop.k20pro",
-  version: "5.1.0",
-  name: "K20 Phim Tổng Hợp",
-  description: "Bản V5.1 Final: Bóc tách luồng siêu tốc. Sửa lỗi sai tập Phim Bộ/Anime. Tích hợp 5 API gốc.",
+  id: "org.phimtonghop.v464",
+  version: "4.6.5",
+  name: "Kho Phim Tổng Hợp HD",
+  description: "Bản V4.6.5: Khôi phục cơ sở dữ liệu 5 API gốc (NguonC, VSMOV, PhimAPI, KKPhim, Ophim) siêu ổn định.",
   resources: ["catalog", "meta", "stream"],
   types: ["movie", "series"], 
   idPrefixes: ["phimapi:"],
@@ -144,7 +143,7 @@ builder.defineCatalogHandler(async (args) => {
   const skip = args.extra?.skip || 0; 
   
   if (args.extra?.search) {
-    const cacheKey = `search_k20_${args.extra.search.toLowerCase().trim()}`;
+    const cacheKey = `search_v465_${args.extra.search.toLowerCase().trim()}`;
     let metas = appCache.get(cacheKey);
     if (!metas) {
       try {
@@ -220,7 +219,7 @@ builder.defineCatalogHandler(async (args) => {
 builder.defineMetaHandler(async (args) => {
   if (args.id?.startsWith("phimapi:")) {
     const slug = args.id.replace("phimapi:", "").split(":")[0]; 
-    const cacheKey = `meta_detail_k20_${slug}`;
+    const cacheKey = `meta_detail_v465_${slug}`;
     if (appCache.has(cacheKey)) return { meta: appCache.get(cacheKey) };
 
     try {
@@ -253,74 +252,65 @@ builder.defineMetaHandler(async (args) => {
   return { meta: {} };
 });
 
-// ============ 3. STREAM HANDLER (BỘ 5 CỔNG SIÊU TỐC V5.1) ============
+// ============ 3. STREAM HANDLER (Khôi phục 5 API Truyền thống) ============
 builder.defineStreamHandler(async (args) => {
   if (args.id?.startsWith("phimapi:")) {
     const idParts = args.id.replace("phimapi:", "").split(":");
     const slug = idParts[0];
-    const episodeNum = idParts[2] ? parseInt(idParts[2]) : 1;
+    const seasonNum = idParts[1] ? parseInt(idParts[1]) : 1;
+    
+    // Nếu là phim lẻ (không có tập), episodeNum tự động mang giá trị null để load toàn bộ link
+    const episodeNum = idParts[2] ? parseInt(idParts[2]) : null;
 
-    const cacheKey = `streams_k20_v51_${slug}_E${episodeNum}`;
+    const cacheKey = `streams_agg_v465_${slug}_S${seasonNum}_E${episodeNum || 'full'}`;
     if (appCache.has(cacheKey)) return { streams: appCache.get(cacheKey) };
 
-    const fetchers = [
-      // 1. VSMOV
-      (async () => {
-        try {
-          const res = await axios.get(`https://vsmov.com/api/film/${slug}`, AXIOS_CONFIG);
-          const servers = res.data?.episodes || res.data?.movie?.episodes || [];
-          return parseServerEpisodes(servers, "VSMOV", "🌐 HLS Proxy", episodeNum);
-        } catch { return []; }
-      })(),
-
-      // 2. KKPHIM / PHIMAPI
-      (async () => {
-        try {
-          const res = await axios.get(`https://phimapi.com/phim/${slug}`, AXIOS_CONFIG);
-          const servers = res.data?.episodes || [];
-          return parseServerEpisodes(servers, "KKPhim", "⚡ Direct CDN", episodeNum);
-        } catch { return []; }
-      })(),
-
-      // 3. NGUONC
-      (async () => {
-        try {
-          const res = await axios.get(`https://phim.nguonc.com/api/film/${slug}`, AXIOS_CONFIG);
-          const servers = res.data?.movie?.episodes || [];
-          return parseServerEpisodes(servers, "NguonC", "⚡ Direct CDN", episodeNum);
-        } catch { return []; }
-      })(),
-
-      // 4. OPHIM (Đã Fix trỏ về Domain API vĩnh viễn)
-      (async () => {
-        try {
-          const res = await axios.get(`https://ophim1.com/phim/${slug}`, AXIOS_CONFIG);
-          const servers = res.data?.episodes || [];
-          return parseServerEpisodes(servers, "Ophim", "⚡ Direct CDN", episodeNum);
-        } catch { return []; }
-      })(),
-
-      // 5. VICDN
-      (async () => {
-        try {
-          const res = await axios.get(`https://vicdn.cc/api/film/${slug}`, AXIOS_CONFIG);
-          const servers = res.data?.episodes || res.data?.movie?.episodes || [];
-          return parseServerEpisodes(servers, "ViCDN", "⚡ Fast CDN", episodeNum);
-        } catch { return []; }
-      })()
+    // 5 Trạm API Chuẩn truyền thống
+    const sourceEndpoints = [
+      { name: "NguonC", url: `https://phim.nguonc.com/api/film/${slug}`, timeout: 3500 },
+      { name: "VSMOV", url: `https://vsmov.com/api/film/${slug}`, timeout: 3500 },
+      { name: "PhimAPI", url: `https://phimapi.com/phim/${slug}`, timeout: 3000 },
+      { name: "KKPhim", url: `https://kkphim.vip/phim/${slug}`, timeout: 3000 },
+      { name: "Ophim", url: `https://ophim1.com/phim/${slug}`, timeout: 3500 }
     ];
 
-    const results = await Promise.allSettled(fetchers);
-    const streams = [];
-    const seenUrls = new Set();
+    const requests = sourceEndpoints.map(src => 
+      axios.get(src.url, { ...AXIOS_CONFIG, timeout: src.timeout })
+        .then(res => ({
+          source: src.name,
+          episodes: res.data?.episodes || res.data?.movie?.episodes || []
+        }))
+        .catch(() => ({ source: src.name, episodes: [] }))
+    );
 
-    results.forEach(r => {
-      if (r.status === "fulfilled" && Array.isArray(r.value)) {
-        r.value.forEach(st => {
-          if (!seenUrls.has(st.url)) {
-            seenUrls.add(st.url);
-            streams.push(st);
-          }
+    const results = await Promise.all(requests);
+    const streams = [];
+    const seenUrls = new Set(); 
+
+    results.forEach(item => {
+      if (item.episodes && item.episodes.length > 0) {
+        item.episodes.forEach(server => {
+          const epList = server.server_data || server.items || [];
+          const serverLabel = server.server_name || "Vietsub";
+
+          epList.forEach((ep, index) => {
+            const currentEpNum = index + 1;
+            
+            // Chỉ bỏ qua nếu là Phim Bộ (có truyền tập) và tập đang duyệt không khớp với tập cần xem
+            if (episodeNum && currentEpNum !== episodeNum) return;
+
+            const m3u8Url = ep.link_m3u8 || ep.m3u8;
+
+            if (m3u8Url && (m3u8Url.includes('.m3u8') || m3u8Url.includes('.mp4')) && !seenUrls.has(m3u8Url)) {
+              seenUrls.add(m3u8Url);
+              
+              streams.push({
+                name: `[${item.source}]`,
+                title: `${serverLabel} - ${ep.name || "Tập " + currentEpNum}\n▶ Xem Mượt`,
+                url: m3u8Url
+              });
+            }
+          });
         });
       }
     });
@@ -331,56 +321,17 @@ builder.defineStreamHandler(async (args) => {
   return { streams: [] };
 });
 
-// Hàm bóc tách tập phim siêu chuẩn (Fix triệt để lỗi Regex)
-function parseServerEpisodes(servers, sourceName, tag, targetEpNum) {
-  const result = [];
-  if (!Array.isArray(servers)) return result;
-
-  servers.forEach(server => {
-    const serverName = server.server_name || "Vietsub";
-    const epList = server.server_data || server.items || [];
-
-    epList.forEach((ep, idx) => {
-      let epNum = idx + 1; // Mặc định thứ tự nếu không tìm thấy số
-      
-      if (ep.slug === "full" || ep.slug === "tap-full") {
-          epNum = 1;
-      } else {
-          // Dùng Regex quét sạch chữ, chỉ giữ lại số (Khắc phục hoàn toàn lỗi parseInt "Tập 1" ra NaN)
-          const matchStr = String(ep.name || ep.slug || "");
-          const numberMatch = matchStr.match(/\d+/);
-          if (numberMatch) {
-              epNum = parseInt(numberMatch[0]);
-          }
-      }
-
-      if (epNum === targetEpNum || epList.length === 1) {
-        const link = ep.link_m3u8 || ep.m3u8;
-        if (link && (link.includes(".m3u8") || link.includes(".mp4"))) {
-          result.push({
-            name: `K20 • ${sourceName}`,
-            title: `[${sourceName}] ${serverName}\n${tag} • Vietsub/TM`,
-            url: link
-          });
-        }
-      }
-    });
-  });
-
-  return result;
-}
-
-// ============ KEEP ALIVE ============
+// ============ SERVER KEEP ALIVE ============
 const RENDER_URL = process.env.RENDER_EXTERNAL_URL;
 if (RENDER_URL) {
   setInterval(() => {
     axios.get(`${RENDER_URL}/manifest.json`)
-      .then(() => console.log("[Keep-Alive] Ping K20 thành công!"))
+      .then(() => console.log("[Keep-Alive] Ping Phim thành công!"))
       .catch((err) => console.log("[Keep-Alive] Lỗi ping:", err.message));
   }, 10 * 60 * 1000);
 }
 
 const PORT = process.env.PORT || 7000;
 serveHTTP(builder.getInterface(), { port: PORT }).then(({ url }) => {
-  console.log(`Addon K20 v5.1 đang chạy tại: ${url}manifest.json`);
+  console.log(`Addon Phim v4.6.5 đang chạy tại: ${url}manifest.json`);
 });
