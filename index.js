@@ -11,7 +11,7 @@ const AXIOS_CONFIG = {
     "Accept": "application/json, text/plain, */*",
     "Referer": "https://google.com"
   },
-  timeout: 4500 
+  timeout: 4000 
 };
 
 // Map chuẩn danh mục
@@ -27,10 +27,10 @@ const COUNTRY_SLUGS = {
 };
 
 const manifest = {
-  id: "org.phimtonghop.v500",
+  id: "org.phimtonghop.hd",
   version: "5.0.0",
   name: "Kho Phim Tổng Hợp HD",
-  description: "Bản V5.0: Tích hợp bộ giải mã Embed NguonC + PhimAPI, VSMOV, Ophim siêu tốc.",
+  description: "Tổng hợp nguồn phim chất lượng cao từ PhimAPI, NguonC, VSMOV, Ophim.",
   resources: ["catalog", "meta", "stream"],
   types: ["movie", "series"], 
   idPrefixes: ["phimapi:"],
@@ -145,7 +145,7 @@ builder.defineCatalogHandler(async (args) => {
   const skip = args.extra?.skip || 0; 
   
   if (args.extra?.search) {
-    const cacheKey = `search_v500_${args.extra.search.toLowerCase().trim()}`;
+    const cacheKey = `search_${args.extra.search.toLowerCase().trim()}`;
     let metas = appCache.get(cacheKey);
     if (!metas) {
       try {
@@ -221,7 +221,7 @@ builder.defineCatalogHandler(async (args) => {
 builder.defineMetaHandler(async (args) => {
   if (args.id?.startsWith("phimapi:")) {
     const slug = args.id.replace("phimapi:", "").split(":")[0]; 
-    const cacheKey = `meta_detail_v500_${slug}`;
+    const cacheKey = `meta_detail_${slug}`;
     if (appCache.has(cacheKey)) return { meta: appCache.get(cacheKey) };
 
     try {
@@ -254,7 +254,7 @@ builder.defineMetaHandler(async (args) => {
   return { meta: {} };
 });
 
-// ============ BỘ GIẢI MÃ EMBED NGUONC ============
+// ============ BỘ GIẢI MÃ LINK EMBED TỪ NGUONC ============
 async function resolveNguonCEmbed(embedUrl) {
   if (!embedUrl) return null;
   const cacheKey = `embed_res_${embedUrl}`;
@@ -263,12 +263,11 @@ async function resolveNguonCEmbed(embedUrl) {
   try {
     const res = await axios.get(embedUrl, {
       headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
         "Referer": "https://phim.nguonc.com/"
       },
       timeout: 3000
     });
-    // Bóc tách link .m3u8 nằm trong script/player HTML của embed
     const match = String(res.data).match(/(https?:\/\/[^"']+\.m3u8[^"']*)/i);
     if (match && match[1]) {
       const directM3u8 = match[1].replace(/\\/g, "");
@@ -279,21 +278,20 @@ async function resolveNguonCEmbed(embedUrl) {
   return null;
 }
 
-// ============ 3. STREAM HANDLER (BÓC TÁCH ĐA NGUỒN TỰ ĐỘNG) ============
+// ============ 3. STREAM HANDLER (BÓC TÁCH NGUỒN TỰ ĐỘNG) ============
 builder.defineStreamHandler(async (args) => {
   if (args.id?.startsWith("phimapi:")) {
     const idParts = args.id.replace("phimapi:", "").split(":");
     const slug = idParts[0];
-    const seasonNum = idParts[1] ? parseInt(idParts[1]) : 1;
     const episodeNum = idParts[2] ? parseInt(idParts[2]) : null;
 
-    const cacheKey = `streams_agg_v500_${slug}_S${seasonNum}_E${episodeNum || 'full'}`;
+    const cacheKey = `streams_agg_${slug}_E${episodeNum || 'full'}`;
     if (appCache.has(cacheKey)) return { streams: appCache.get(cacheKey) };
 
     const streams = [];
     const seenUrls = new Set();
 
-    // 1. Fetch PhimAPI (KKPhim)
+    // 1. PhimAPI (KKPhim)
     const p1 = (async () => {
       try {
         const res = await axios.get(`https://phimapi.com/phim/${slug}`, AXIOS_CONFIG);
@@ -307,8 +305,8 @@ builder.defineStreamHandler(async (args) => {
             if (url && (url.includes('.m3u8') || url.includes('.mp4')) && !seenUrls.has(url)) {
               seenUrls.add(url);
               streams.push({
-                name: "K20 • KKPhim",
-                title: `[KKPhim] ${sName}\n⚡ Direct CDN • Vietsub/TM`,
+                name: "[PhimAPI]",
+                title: `${sName} - ${ep.name || "Full"}\n⚡ Direct CDN • Vietsub/TM`,
                 url: url
               });
             }
@@ -317,7 +315,7 @@ builder.defineStreamHandler(async (args) => {
       } catch (e) {}
     })();
 
-    // 2. Fetch VSMOV
+    // 2. VSMOV
     const p2 = (async () => {
       try {
         const res = await axios.get(`https://vsmov.com/api/films/${slug}`, AXIOS_CONFIG);
@@ -331,8 +329,8 @@ builder.defineStreamHandler(async (args) => {
             if (url && (url.includes('.m3u8') || url.includes('.mp4')) && !seenUrls.has(url)) {
               seenUrls.add(url);
               streams.push({
-                name: "K20 • VSMOV",
-                title: `[VSMOV] ${sName}\n🌐 HLS Proxy • Vietsub/TM`,
+                name: "[VSMOV]",
+                title: `${sName} - ${ep.name || "Full"}\n⚡ Fast CDN • Vietsub/TM`,
                 url: url
               });
             }
@@ -341,7 +339,7 @@ builder.defineStreamHandler(async (args) => {
       } catch (e) {}
     })();
 
-    // 3. Fetch Ophim (API V1)
+    // 3. Ophim
     const p3 = (async () => {
       try {
         const res = await axios.get(`https://ophim1.cc/v1/api/phim/${slug}`, AXIOS_CONFIG);
@@ -355,8 +353,8 @@ builder.defineStreamHandler(async (args) => {
             if (url && (url.includes('.m3u8') || url.includes('.mp4')) && !seenUrls.has(url)) {
               seenUrls.add(url);
               streams.push({
-                name: "K20 • Ophim",
-                title: `[Ophim] ${sName}\n⚡ Direct CDN • Vietsub/TM`,
+                name: "[Ophim]",
+                title: `${sName} - ${ep.name || "Full"}\n⚡ Direct CDN • Vietsub/TM`,
                 url: url
               });
             }
@@ -365,13 +363,13 @@ builder.defineStreamHandler(async (args) => {
       } catch (e) {}
     })();
 
-    // 4. Fetch NguonC + Giải mã Embed sang .m3u8
+    // 4. NguonC
     const p4 = (async () => {
       try {
         const res = await axios.get(`https://phim.nguonc.com/api/film/${slug}`, AXIOS_CONFIG);
         const epServers = res.data?.movie?.episodes || [];
         for (const server of epServers) {
-          const sName = server.server_name || "Vietsub #1";
+          const sName = server.server_name || "Vietsub";
           const items = server.items || [];
           for (let idx = 0; idx < items.length; idx++) {
             const curEp = idx + 1;
@@ -385,8 +383,8 @@ builder.defineStreamHandler(async (args) => {
             if (finalUrl && (finalUrl.includes('.m3u8') || finalUrl.includes('.mp4')) && !seenUrls.has(finalUrl)) {
               seenUrls.add(finalUrl);
               streams.push({
-                name: "K20 • NguonC",
-                title: `[NguonC] ${sName}\n⚡ Direct CDN • Vietsub/TM`,
+                name: "[NguonC]",
+                title: `${sName} - ${items[idx].name || "Full"}\n⚡ Direct CDN • Vietsub/TM`,
                 url: finalUrl
               });
             }
@@ -403,17 +401,17 @@ builder.defineStreamHandler(async (args) => {
   return { streams: [] };
 });
 
-// ============ KEEP ALIVE ============
+// ============ SERVER KEEP ALIVE ============
 const RENDER_URL = process.env.RENDER_EXTERNAL_URL;
 if (RENDER_URL) {
   setInterval(() => {
     axios.get(`${RENDER_URL}/manifest.json`)
-      .then(() => console.log("[Keep-Alive] Ping K20 thành công!"))
+      .then(() => console.log("[Keep-Alive] Ping thành công!"))
       .catch((err) => console.log("[Keep-Alive] Lỗi ping:", err.message));
   }, 10 * 60 * 1000);
 }
 
 const PORT = process.env.PORT || 7000;
 serveHTTP(builder.getInterface(), { port: PORT }).then(({ url }) => {
-  console.log(`Addon K20 v5.0 đang chạy tại: ${url}manifest.json`);
+  console.log(`Addon đang chạy tại: ${url}manifest.json`);
 });
