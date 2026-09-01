@@ -267,11 +267,10 @@ builder.defineStreamHandler(async (args) => {
 
     // 5 Trạm API Chuẩn truyền thống
     const sourceEndpoints = [
-      { name: "NguonC", url: `https://phim.nguonc.com/api/film/${slug}`, timeout: 3500 },
-      { name: "VSMOV", url: `https://vsmov.com/api/film/${slug}`, timeout: 3500 },
       { name: "PhimAPI", url: `https://phimapi.com/phim/${slug}`, timeout: 3000 },
-      { name: "KKPhim", url: `https://kkphim.vip/phim/${slug}`, timeout: 3000 },
-      { name: "Ophim", url: `https://ophim1.com/phim/${slug}`, timeout: 3500 }
+      { name: "NguonC", url: `https://phim.nguonc.com/api/film/${slug}`, timeout: 3500 },
+      { name: "Ophim", url: `https://ophim1.cc/v1/api/phim/${slug}`, timeout: 3500 },
+      { name: "VSMOV", url: `https://vsmov.com/api/films/${slug}`, timeout: 3500 }
     ];
 
     const requests = sourceEndpoints.map(src => 
