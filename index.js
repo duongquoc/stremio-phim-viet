@@ -28,13 +28,19 @@ const COUNTRY_SLUGS = {
 
 const manifest = {
   id: "org.phimtonghop.hd",
-  version: "5.0.0",
+  version: "5.1.0", // Đã cập nhật thêm NguonC
   name: "Kho Phim Tổng Hợp HD",
   description: "Tổng hợp nguồn phim chất lượng cao từ PhimAPI, NguonC, VSMOV, Ophim.",
   resources: ["catalog", "meta", "stream"],
   types: ["movie", "series"], 
   idPrefixes: ["phimapi:"],
   catalogs: [
+    {
+      type: "movie",
+      id: "phim_nguonc_moi",
+      name: "🔥 Phim Mới NguonC (Cập Nhật)",
+      extra: [{ name: "skip", isRequired: false }]
+    },
     {
       type: "movie",
       id: "phim_moi_viet",
@@ -140,6 +146,38 @@ function convertItemsToMetas(items) {
   });
 }
 
+// Hàm cào danh sách từ NguonC
+async function fetchNguonCItems(numPages = 3) {
+  const allItems = [];
+  const requests = [];
+  for (let i = 1; i <= numPages; i++) {
+    requests.push(axios.get(`https://phim.nguonc.com/api/films/phim-moi-cap-nhat?page=${i}`, AXIOS_CONFIG).catch(() => null));
+  }
+  const responses = await Promise.all(requests);
+  responses.forEach((res) => {
+    if (res && res.data?.items) {
+      allItems.push(...res.data.items);
+    }
+  });
+  return allItems;
+}
+
+// Hàm chuẩn hóa dữ liệu NguonC sang giao diện Stremio
+function convertNguonCToMetas(items) {
+  return items.map((item) => {
+    const baseName = item.name || item.original_name;
+    return {
+      id: `phimapi:${item.slug}`,
+      type: "movie",
+      name: `[NguonC] ${baseName}`,
+      poster: item.poster_url || item.thumb_url,
+      background: item.thumb_url || item.poster_url,
+      description: `⚡ Nguồn: NguonC\nTên gốc: ${item.original_name || item.name}\nNăm: ${item.year || "N/A"}\nChất lượng: ${item.quality || "HD"} - ${item.language || "Vietsub"}`,
+      releaseInfo: item.year ? String(item.year) : ""
+    };
+  });
+}
+
 // ============ 1. CATALOG HANDLER ============
 builder.defineCatalogHandler(async (args) => {
   const skip = args.extra?.skip || 0; 
@@ -162,6 +200,14 @@ builder.defineCatalogHandler(async (args) => {
   let metas = appCache.get(cacheKey);
 
   if (!metas) {
+    // Xử lý riêng cho danh mục NguonC
+    if (args.id === "phim_nguonc_moi") {
+      const items = await fetchNguonCItems(4); // Lấy 4 trang phim mới nhất
+      metas = convertNguonCToMetas(items);
+      appCache.set(cacheKey, metas, 7200);
+      return { metas: metas.slice(skip, skip + 100) };
+    }
+
     let isTopRating = args.id === "phim_viet_top" || args.id === "phim_top_quoc_te";
     let items = [];
 
