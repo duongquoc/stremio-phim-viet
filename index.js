@@ -202,7 +202,7 @@ builder.defineCatalogHandler(async (args) => {
   if (!metas) {
     // Xử lý riêng cho danh mục NguonC
     if (args.id === "phim_nguonc_moi") {
-      const items = await fetchNguonCItems(4); // Lấy 4 trang phim mới nhất
+      const items = await fetchNguonCItems(20); // Lấy 20 trang phim mới nhất
       metas = convertNguonCToMetas(items);
       appCache.set(cacheKey, metas, 7200);
       return { metas: metas.slice(skip, skip + 100) };
