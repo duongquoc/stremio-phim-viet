@@ -28,7 +28,7 @@ const COUNTRY_SLUGS = {
 
 const manifest = {
   id: "org.phimtonghop.hd",
-  version: "5.1.0", // Đã cập nhật thêm NguonC
+  version: "5.2.0", // Phiên bản tích hợp NguonC toàn diện (Catalog + Tìm kiếm + Fallback)
   name: "Kho Phim Tổng Hợp HD",
   description: "Tổng hợp nguồn phim chất lượng cao từ PhimAPI, NguonC, VSMOV, Ophim.",
   resources: ["catalog", "meta", "stream"],
@@ -39,7 +39,7 @@ const manifest = {
       type: "movie",
       id: "phim_nguonc_moi",
       name: "🔥 Phim Mới NguonC (Cập Nhật)",
-      extra: [{ name: "skip", isRequired: false }]
+      extra: [{ name: "search", isRequired: false }, { name: "skip", isRequired: false }]
     },
     {
       type: "movie",
@@ -146,32 +146,18 @@ function convertItemsToMetas(items) {
   });
 }
 
-// Hàm cào danh sách từ NguonC
-async function fetchNguonCItems(numPages = 3) {
-  const allItems = [];
-  const requests = [];
-  for (let i = 1; i <= numPages; i++) {
-    requests.push(axios.get(`https://phim.nguonc.com/api/films/phim-moi-cap-nhat?page=${i}`, AXIOS_CONFIG).catch(() => null));
-  }
-  const responses = await Promise.all(requests);
-  responses.forEach((res) => {
-    if (res && res.data?.items) {
-      allItems.push(...res.data.items);
-    }
-  });
-  return allItems;
-}
-
 // Hàm chuẩn hóa dữ liệu NguonC sang giao diện Stremio
 function convertNguonCToMetas(items) {
+  if (!Array.isArray(items)) return [];
   return items.map((item) => {
     const baseName = item.name || item.original_name;
+    const isSeries = item.type === "series" || (item.current_episode && item.current_episode !== "Full");
     return {
       id: `phimapi:${item.slug}`,
-      type: "movie",
+      type: isSeries ? "series" : "movie",
       name: `[NguonC] ${baseName}`,
-      poster: item.poster_url || item.thumb_url,
-      background: item.thumb_url || item.poster_url,
+      poster: formatImageUrl(item.poster_url || item.thumb_url),
+      background: formatImageUrl(item.thumb_url || item.poster_url),
       description: `⚡ Nguồn: NguonC\nTên gốc: ${item.original_name || item.name}\nNăm: ${item.year || "N/A"}\nChất lượng: ${item.quality || "HD"} - ${item.language || "Vietsub"}`,
       releaseInfo: item.year ? String(item.year) : ""
     };
@@ -182,32 +168,67 @@ function convertNguonCToMetas(items) {
 builder.defineCatalogHandler(async (args) => {
   const skip = args.extra?.skip || 0; 
   
+  // TÌM KIẾM ĐỒNG THỜI CẢ PHIMAPI VÀ NGUONC
   if (args.extra?.search) {
-    const cacheKey = `search_${args.extra.search.toLowerCase().trim()}`;
+    const query = args.extra.search.toLowerCase().trim();
+    const cacheKey = `search_${query}`;
     let metas = appCache.get(cacheKey);
     if (!metas) {
       try {
-        const res = await axios.get(`https://phimapi.com/v1/api/tim-kiem?keyword=${encodeURIComponent(args.extra.search)}&limit=40`, AXIOS_CONFIG);
-        metas = convertItemsToMetas(res.data?.data?.items || []);
+        const [resPhimApi, resNguonC] = await Promise.all([
+          axios.get(`https://phimapi.com/v1/api/tim-kiem?keyword=${encodeURIComponent(query)}&limit=40`, AXIOS_CONFIG).catch(() => null),
+          axios.get(`https://phim.nguonc.com/api/films/search?keyword=${encodeURIComponent(query)}`, AXIOS_CONFIG).catch(() => null)
+        ]);
+
+        const metasPhimApi = convertItemsToMetas(resPhimApi?.data?.data?.items || []);
+        const metasNguonC = convertNguonCToMetas(resNguonC?.data?.items || []);
+
+        const seenIds = new Set();
+        const combined = [];
+        for (const item of [...metasPhimApi, ...metasNguonC]) {
+          if (!seenIds.has(item.id)) {
+            seenIds.add(item.id);
+            combined.push(item);
+          }
+        }
+        metas = combined;
         appCache.set(cacheKey, metas, 3600);
       } catch (error) { metas = []; }
     }
-    return { metas: metas.slice(skip, skip + 100) };
+    return { metas: (metas || []).slice(skip, skip + 100) };
   }
 
+  // DANH MỤC NGUONC - PHÂN TRANG ĐỘNG MƯỢT MÀ THEO THAO TÁC CUỘN
+  if (args.id === "phim_nguonc_moi") {
+    const cacheKey = `nguonc_cat_skip_${skip}`;
+    let metas = appCache.get(cacheKey);
+    if (!metas) {
+      const startPage = Math.floor(skip / 10) + 1;
+      const requests = [];
+      for (let i = startPage; i < startPage + 10; i++) {
+        requests.push(
+          axios.get(`https://phim.nguonc.com/api/films/phim-moi-cap-nhat?page=${i}`, AXIOS_CONFIG).catch(() => null)
+        );
+      }
+      const responses = await Promise.all(requests);
+      let items = [];
+      responses.forEach((res) => {
+        if (res && res.data?.items) {
+          items.push(...res.data.items);
+        }
+      });
+      metas = convertNguonCToMetas(items);
+      appCache.set(cacheKey, metas, 3600);
+    }
+    return { metas: metas };
+  }
+
+  // CÁC DANH MỤC CÒN LẠI TỪ PHIMAPI
   const selectedGenre = args.extra?.genre || null;
   const cacheKey = `cat_${args.id}_${selectedGenre || "all"}`;
   let metas = appCache.get(cacheKey);
 
   if (!metas) {
-    // Xử lý riêng cho danh mục NguonC
-    if (args.id === "phim_nguonc_moi") {
-      const items = await fetchNguonCItems(30); // Lấy 20 trang phim mới nhất
-      metas = convertNguonCToMetas(items);
-      appCache.set(cacheKey, metas, 7200);
-      return { metas: metas.slice(skip, skip + 100) };
-    }
-
     let isTopRating = args.id === "phim_viet_top" || args.id === "phim_top_quoc_te";
     let items = [];
 
@@ -263,7 +284,7 @@ builder.defineCatalogHandler(async (args) => {
   return { metas: metas.slice(skip, skip + 100) };
 });
 
-// ============ 2. META HANDLER ============
+// ============ 2. META HANDLER (CÓ DỰ PHÒNG NGUONC KHI PHIMAPI KHÔNG CÓ) ============
 builder.defineMetaHandler(async (args) => {
   if (args.id?.startsWith("phimapi:")) {
     const slug = args.id.replace("phimapi:", "").split(":")[0]; 
@@ -271,10 +292,43 @@ builder.defineMetaHandler(async (args) => {
     if (appCache.has(cacheKey)) return { meta: appCache.get(cacheKey) };
 
     try {
-      const res = await axios.get(`https://phimapi.com/phim/${slug}`, AXIOS_CONFIG);
-      const movie = res.data?.movie;
-      if (!movie) return { meta: {} };
+      // 1. Thử lấy thông tin từ PhimAPI
+      const res = await axios.get(`https://phimapi.com/phim/${slug}`, AXIOS_CONFIG).catch(() => null);
+      let movie = res?.data?.movie;
 
+      // 2. Nếu PhimAPI không có (phim từ NguonC), fallback sang NguonC
+      if (!movie) {
+        const resNguonC = await axios.get(`https://phim.nguonc.com/api/film/${slug}`, AXIOS_CONFIG).catch(() => null);
+        movie = resNguonC?.data?.movie;
+        if (movie) {
+          const episodes = movie.episodes || [];
+          const isSeries = movie.type === "series" || (episodes[0]?.items?.length > 1) || (episodes[0]?.items?.[0]?.name && episodes[0]?.items?.[0]?.name !== "Full");
+          const meta = {
+            id: `phimapi:${slug}`,
+            type: isSeries ? "series" : "movie",
+            name: movie.name || movie.original_name,
+            poster: formatImageUrl(movie.poster_url || movie.thumb_url),
+            background: formatImageUrl(movie.thumb_url || movie.poster_url),
+            description: `[NguonC] ${movie.description ? movie.description.replace(/<[^>]*>?/gm, "") : ""}`,
+            releaseInfo: movie.year ? String(movie.year) : "",
+            genres: movie.category ? Object.values(movie.category).map(c => c.name || c) : ["Phim"]
+          };
+          if (isSeries && episodes.length > 0) {
+            const serverItems = episodes[0].items || [];
+            meta.videos = serverItems.map((ep, idx) => ({
+              id: `phimapi:${slug}:1:${idx + 1}`,
+              title: ep.name ? (ep.name.toLowerCase().includes("tập") ? ep.name : `Tập ${ep.name}`) : `Tập ${idx + 1}`,
+              season: 1,
+              episode: idx + 1
+            }));
+          }
+          appCache.set(cacheKey, meta, 86400);
+          return { meta };
+        }
+        return { meta: {} };
+      }
+
+      // Nếu PhimAPI có dữ liệu:
       let rating = "N/A";
       if (movie.tmdb?.vote_average) rating = movie.tmdb.vote_average;
 
@@ -292,6 +346,17 @@ builder.defineMetaHandler(async (args) => {
         genres: movie.category ? movie.category.map((c) => c.name) : ["Phim"],
         imdbRating: rating !== "N/A" ? String(rating) : undefined
       };
+
+      const epData = res?.data?.episodes;
+      if (isSeries && epData && epData.length > 0) {
+        const sItems = epData[0]?.server_data || [];
+        meta.videos = sItems.map((ep, idx) => ({
+          id: `phimapi:${slug}:1:${idx + 1}`,
+          title: ep.name || `Tập ${idx + 1}`,
+          season: 1,
+          episode: idx + 1
+        }));
+      }
 
       appCache.set(cacheKey, meta, 86400); 
       return { meta: meta };
